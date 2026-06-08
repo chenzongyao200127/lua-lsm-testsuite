@@ -1,0 +1,44 @@
+From: lua-lsm-testsuite
+Subject: [PATCH] run_qemu_anolis: add QEMU_MONITOR_SOCK env knob
+
+Provide a Unix-socket QEMU monitor for clean guest shutdown via QMP. With a
+monitor available, the harness can issue {"execute":"system_powerdown"} or
+{"execute":"quit"} when a cell ends, which is faster and gentler than
+SIGTERM->SIGKILL on the launcher PID.
+
+Default empty preserves existing behaviour. When set, the path becomes a
+Unix socket created by QEMU at startup with `,server,nowait` so the monitor
+is reachable as soon as QEMU is up; the harness opens it on-demand.
+
+This patch is shipped separately from the harness so it can be merged into
+DebugKernel on its own schedule.
+
+---
+ run_qemu_anolis.sh | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/run_qemu_anolis.sh b/run_qemu_anolis.sh
+--- a/run_qemu_anolis.sh
++++ b/run_qemu_anolis.sh
+@@ -136,6 +136,8 @@ ROOT_DEV="${ROOT_DEV:-/dev/vda}"
+ CONSOLE="${CONSOLE:-ttyS0}"
+ KERNEL_CMDLINE="${KERNEL_CMDLINE:-}"
+ EXTRA_CMDLINE="${EXTRA_CMDLINE:-}"
+ QEMU_EXTRA_ARGS="${QEMU_EXTRA_ARGS:-}"
++QEMU_MONITOR_SOCK="${QEMU_MONITOR_SOCK:-}"
+
+ ENABLE_GDB="${ENABLE_GDB:-0}"
+ GDB_PORT="${GDB_PORT:-1235}"
+@@ -274,6 +276,12 @@ if [[ "${DEBUG_WAIT}" == "1" ]]; then
+     QEMU_ARGS+=(-S)
+ fi
+
++if [[ -n "${QEMU_MONITOR_SOCK}" ]]; then
++    QEMU_ARGS+=(-monitor "unix:${QEMU_MONITOR_SOCK},server,nowait")
++fi
++
+ if [[ -n "${QEMU_EXTRA_ARGS}" ]]; then
+     read -r -a QEMU_EXTRA_ARGS_ARR <<< "${QEMU_EXTRA_ARGS}"
+     QEMU_ARGS+=("${QEMU_EXTRA_ARGS_ARR[@]}")
+--
+2.40.0

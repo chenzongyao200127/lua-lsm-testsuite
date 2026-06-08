@@ -1,0 +1,22 @@
+# Default smoke matrix: 32 cells covering the DEC-5 axes.
+#
+# Cartesian product = 4 * 2 * 2 * 2 = 32 cells:
+#   policy          in {hello, denyfile, exectl, pindown}
+#   lvm_pool_max    in {0, 32}       (0 disables the pool; 32 is the default)
+#   kconfig_profile in {standard, full}
+#   workload        in {smoke, bench-short}
+#
+# `workload` listed under `axes` becomes per-cell; the top-level `workload`
+# is only used when an axis named `workload` is absent. We list both so the
+# loader still has a sensible fallback if the axis is removed.
+name: smoke
+workload: smoke
+defaults:
+  kvm_required: true
+  kind: bughunt
+axes:
+  policy: [hello, denyfile, exectl, pindown]
+  lvm_pool_max: [0, 32]
+  kconfig_profile: [standard, full]
+  workload: [smoke, bench-short]
+exclude: []

@@ -1,0 +1,15 @@
+# 20-min lazy-VM bench: continuous register/unregister cycling under
+# lvm_pool_max=0 (forced lazy alloc). bench-short does one load-side then
+# one unload-side; bench_loops=24 -> ~24 * 17 * 1.5s per side ~= 10 min/side.
+name: bench-20min
+workload: bench-short
+defaults:
+  kvm_required: true
+  kind: bughunt
+  bench_loops: 24
+  workload_timeout_s: 1500
+axes:
+  policy: [hello]
+  lvm_pool_max: [0]
+  kconfig_profile: [standard]
+exclude: []

@@ -1,0 +1,76 @@
+UV ?= uv
+PYTHON ?= $(UV) run python
+WORKSPACE ?= $(realpath $(dir $(realpath $(firstword $(MAKEFILE_LIST))))/..)
+KERNEL_TREE ?= $(WORKSPACE)/kernel/linux
+TOOLS_DIR ?= $(realpath $(dir $(realpath $(firstword $(MAKEFILE_LIST))))/tools)
+ROOTFS_IMG ?= $(TOOLS_DIR)/rocky9-selinux-rootfs.qcow2
+KERNEL_IMG ?= $(KERNEL_TREE)/arch/x86/boot/bzImage
+DEBUG_KERNEL ?= $(TOOLS_DIR)
+LUA_LSM_TOOLS ?= $(WORKSPACE)/lua-lsm-tools
+PARALLEL ?= 2
+
+POLICY ?= hello
+
+export KERNEL_TREE ROOTFS_IMG KERNEL_IMG DEBUG_KERNEL LUA_LSM_TOOLS WORKSPACE TOOLS_DIR
+
+.PHONY: help sync smoke matrix matrix-perf bisect-run image image-warm kernel-debug test selftest clean distclean
+
+help:
+	@echo "Targets:"
+	@echo "  sync                         install/update the uv-managed project environment"
+	@echo "  smoke POLICY=<name>          run a single smoke cell with the named policy"
+	@echo "  matrix                       run the default 32-cell smoke matrix"
+	@echo "  matrix-perf                  run the UnixBench-anchored matrix (opt-in)"
+	@echo "  bisect-run CELL=<matrix>     run a matrix as a git bisect target with KSFT exit codes"
+	@echo "  image                        build the Rocky9 rootfs with the vendored helper"
+	@echo "  image-warm                   pre-warm the rootfs (consume autorelabel; required before perf runs)"
+	@echo "  kernel-debug PROFILE=<name>  invoke vendored enable-debug-kconfig.sh --profile {standard,full}"
+	@echo "  test                         run harness unit tests with $(PYTHON)"
+	@echo "  selftest                     run lightweight in-tree self-tests (classifier patterns, etc.)"
+	@echo "  clean                        remove generated artifacts and caches"
+	@echo "  distclean                    alias for clean"
+
+sync:
+	$(UV) sync --dev
+
+smoke:
+	$(PYTHON) -m harness run --headless --policy $(POLICY) --workload smoke \
+		--kernel $(KERNEL_IMG) --rootfs $(ROOTFS_IMG)
+
+matrix:
+	$(PYTHON) -m harness matrix --config configs/smoke.json --parallel $(PARALLEL) \
+		--kernel $(KERNEL_IMG) --rootfs $(ROOTFS_IMG)
+
+matrix-perf:
+	$(PYTHON) -m harness matrix --config configs/perf.yaml --parallel $(PARALLEL) \
+		--kernel $(KERNEL_IMG) --rootfs $(ROOTFS_IMG)
+
+bisect-run:
+	@test -n "$(CELL)" || { echo "CELL=<path-to-matrix.{yaml,json}> is required"; exit 2; }
+	$(PYTHON) -m harness bisect-run --config $(CELL) \
+		--kernel $(KERNEL_IMG) --rootfs $(ROOTFS_IMG)
+
+image:
+	$(DEBUG_KERNEL)/create_rocky_selinux_rootfs.sh
+
+image-warm:
+	$(PYTHON) -m harness image-warm --image $(ROOTFS_IMG)
+
+kernel-debug:
+	@test -n "$(PROFILE)" || { echo "PROFILE={standard,full} is required"; exit 2; }
+	@test -d "$(KERNEL_TREE)" || { echo "KERNEL_TREE=$(KERNEL_TREE) is not a directory"; exit 2; }
+	$(DEBUG_KERNEL)/enable-debug-kconfig.sh --kernel $(KERNEL_TREE) --profile $(PROFILE)
+
+test:
+	$(UV) run pytest
+
+selftest:
+	$(PYTHON) -m harness.classifier_patterns --selftest
+	$(PYTHON) -m harness.signature --selftest
+
+clean:
+	rm -rf runs out __pycache__ harness/__pycache__ tests/__pycache__ \
+		.pytest_cache .mypy_cache .ruff_cache .hypothesis \
+		build dist .eggs *.egg-info htmlcov .coverage junit.xml .venv
+
+distclean: clean

@@ -1,0 +1,20 @@
+# UnixBench-anchored perf matrix. Smaller than smoke (perf cells are slower)
+# and pinned to `kind: perf` so bug-hunt knobs never distort timing.
+#
+# Every cell registers `denyfile.lua` before UnixBench so AC-5.1 hook
+# deltas (file_post_open.count etc.) are measurable in result.json.perf.
+# Override per-cell via the `policy` axis if a different policy is wanted.
+name: perf
+workload: unixbench
+defaults:
+  kvm_required: true
+  kconfig_profile: standard
+  kind: perf
+  policy: denyfile
+axes:
+  lvm_pool_max: [16, 64]
+  lsm:
+    - "capability,bpf,lua"
+    - "capability,yama,lua,selinux,bpf,integrity"
+  nodebug: [true, false]
+exclude: []

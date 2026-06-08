@@ -1,0 +1,44 @@
+From: lua-lsm-testsuite
+Subject: [PATCH] run_qemu_anolis: add QEMU_PIDFILE env knob
+
+The harness needs a deterministic way to identify the QEMU child PID for
+clean shutdown when a cell reaches its boot-timeout. Without -pidfile, the
+launcher script's PID is the only handle the harness has, and signalling it
+sometimes leaves a zombie qemu-system-x86_64 holding the host SSH port,
+which then breaks the next cell.
+
+Add an optional QEMU_PIDFILE env var; when set, pass `-pidfile <path>` to
+QEMU. Default empty preserves existing behaviour.
+
+This patch is shipped separately from the harness so it can be merged into
+DebugKernel on its own schedule.
+
+---
+ run_qemu_anolis.sh | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/run_qemu_anolis.sh b/run_qemu_anolis.sh
+--- a/run_qemu_anolis.sh
++++ b/run_qemu_anolis.sh
+@@ -136,6 +136,8 @@ ROOT_DEV="${ROOT_DEV:-/dev/vda}"
+ CONSOLE="${CONSOLE:-ttyS0}"
+ KERNEL_CMDLINE="${KERNEL_CMDLINE:-}"
+ EXTRA_CMDLINE="${EXTRA_CMDLINE:-}"
+ QEMU_EXTRA_ARGS="${QEMU_EXTRA_ARGS:-}"
++QEMU_PIDFILE="${QEMU_PIDFILE:-}"
+
+ ENABLE_GDB="${ENABLE_GDB:-0}"
+ GDB_PORT="${GDB_PORT:-1235}"
+@@ -274,6 +276,12 @@ if [[ "${DEBUG_WAIT}" == "1" ]]; then
+     QEMU_ARGS+=(-S)
+ fi
+
++if [[ -n "${QEMU_PIDFILE}" ]]; then
++    QEMU_ARGS+=(-pidfile "${QEMU_PIDFILE}")
++fi
++
+ if [[ -n "${QEMU_EXTRA_ARGS}" ]]; then
+     read -r -a QEMU_EXTRA_ARGS_ARR <<< "${QEMU_EXTRA_ARGS}"
+     QEMU_ARGS+=("${QEMU_EXTRA_ARGS_ARR[@]}")
+--
+2.40.0

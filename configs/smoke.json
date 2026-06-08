@@ -1,0 +1,15 @@
+{
+  "name": "smoke",
+  "workload": "smoke",
+  "defaults": {
+    "kvm_required": true,
+    "kind": "bughunt"
+  },
+  "axes": {
+    "policy": ["hello", "denyfile", "exectl", "pindown"],
+    "lvm_pool_max": [0, 32],
+    "kconfig_profile": ["standard", "full"],
+    "workload": ["smoke", "bench-short"]
+  },
+  "exclude": []
+}
