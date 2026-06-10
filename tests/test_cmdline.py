@@ -26,6 +26,13 @@ class ComposeTests(unittest.TestCase):
         cmdline = compose(profile)
         self.assertNotIn("lua.lvm_pool_max=", cmdline)
 
+    def test_bench_profile_emits_lsm_without_panic_knobs(self):
+        profile = {"kind": "bench", "lsm": "capability,yama,lua"}
+        cmdline = compose(profile)
+        self.assertIn("lsm=capability,yama,lua", cmdline)
+        for knob in BUGHUNT_KNOBS:
+            self.assertNotIn(knob, cmdline)
+
     def test_bughunt_profile_emits_panic_knobs(self):
         profile = {"kind": "bughunt", "lsm": "lua"}
         cmdline = compose(profile)

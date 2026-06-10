@@ -127,6 +127,31 @@ class CliRunTests(unittest.TestCase):
             self.assertGreaterEqual(len(result.get("commands") or []), 1,
                                     "result.json must list the guest commands the workload ran")
 
+    def test_artifact_guest_relpath_prefers_share_dir_root(self):
+        with TemporaryDirectory() as td:
+            workspace = Path(td)
+            repo = workspace / "lua-lsm-testsuite"
+            artifact = repo / "runs" / "cell-1"
+            artifact.mkdir(parents=True)
+            rel = cli._artifact_guest_relpath(
+                artifact_dir=artifact,
+                share_dir=workspace,
+                workspace_root=repo,
+            )
+            self.assertEqual(rel, "lua-lsm-testsuite/runs/cell-1")
+
+    def test_artifact_guest_relpath_falls_back_to_workspace_root(self):
+        with TemporaryDirectory() as td:
+            repo = Path(td)
+            artifact = repo / "runs" / "cell-1"
+            artifact.mkdir(parents=True)
+            rel = cli._artifact_guest_relpath(
+                artifact_dir=artifact,
+                share_dir=None,
+                workspace_root=repo,
+            )
+            self.assertEqual(rel, "runs/cell-1")
+
 
 class CliMatrixTests(unittest.TestCase):
     def _smoke_config(self) -> Path:

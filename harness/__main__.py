@@ -76,8 +76,10 @@ def _build_parser() -> argparse.ArgumentParser:
     pr.add_argument("--workload", default="smoke",
                     choices=sorted(workloads.REGISTRY))
     pr.add_argument("--policy", default=None,
-                    help="policy file under lua-lsm-tools/examples (default: hello.lua)")
-    pr.add_argument("--kind", default="bughunt", choices=("perf", "bughunt"))
+                    help=("policy file under lua-lsm-tools/examples "
+                          "(default: hello.lua; pass 'none' to skip policy "
+                          "registration for unixbench)"))
+    pr.add_argument("--kind", default="bughunt", choices=("perf", "bughunt", "bench"))
     pr.add_argument("--lsm", default=None,
                     help="lsm chain string passed to the kernel cmdline")
     pr.add_argument("--lvm-pool-max", type=int, default=None)
@@ -364,6 +366,8 @@ def _resolve_policy_paths(share_dir: Path | None, policy_name: str | None,
     if share_dir is None:
         return tuple()
     name = policy_name
+    if isinstance(name, str) and name.strip().lower() == "none":
+        return tuple()
     if name is None and workload_name == "smoke":
         name = _DEFAULT_SMOKE_POLICY
     if not name:
@@ -387,6 +391,30 @@ def _base_env(args: argparse.Namespace,
     if guest_artifact_relpath:
         env["GUEST_ARTIFACT_RELPATH"] = guest_artifact_relpath
     return env
+
+
+def _artifact_guest_relpath(artifact_dir: Path,
+                            share_dir: Path | None,
+                            workspace_root: Path) -> str | None:
+    """Map a host artifact dir to its guest-visible path under /mnt/host.
+
+    When a share_dir is configured, the guest sees that directory as the root
+    of /mnt/host, so paths must be made relative to share_dir rather than the
+    harness repo cwd. Falling back to workspace_root preserves the old behavior
+    for local runs that do not pass --share-dir.
+    """
+    roots: tuple[Path, ...]
+    if share_dir is not None:
+        roots = (Path(share_dir), Path(workspace_root))
+    else:
+        roots = (Path(workspace_root),)
+    artifact_resolved = artifact_dir.resolve()
+    for root in roots:
+        try:
+            return str(artifact_resolved.relative_to(root.resolve()))
+        except ValueError:
+            continue
+    return None
 
 
 def _ssh_target(args: argparse.Namespace, port: int) -> ssh.SshTarget:
@@ -438,11 +466,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
 
     cell_id = cell_runner._make_cell_id({"kind": args.kind, "workload": args.workload}, args.workload)
     artifact_dir = runs_root / cell_id
-    guest_rel = None
-    try:
-        guest_rel = str(artifact_dir.resolve().relative_to(workspace_root.resolve()))
-    except ValueError:
-        guest_rel = None
+    guest_rel = _artifact_guest_relpath(artifact_dir, args.share_dir, workspace_root)
 
     profile = _profile_from_run_args(args)
     profile["guest_artifact_relpath"] = guest_rel
@@ -547,11 +571,9 @@ def _build_cell_runner_callback(args: argparse.Namespace, workspace_root: Path,
     """
 
     def _runner(cell: matrix.CellSpec, artifact_dir: Path, port: int) -> dict[str, Any]:
-        guest_rel = None
-        try:
-            guest_rel = str(artifact_dir.resolve().relative_to(workspace_root.resolve()))
-        except ValueError:
-            guest_rel = None
+        guest_rel = _artifact_guest_relpath(
+            artifact_dir, getattr(args, "share_dir", None), workspace_root,
+        )
         profile = dict(cell.profile)
         profile.setdefault("workload_timeout_s", args.workload_timeout)
         profile["guest_artifact_relpath"] = guest_rel
@@ -728,12 +750,7 @@ def _cmd_bisect_run_single_cell(args: argparse.Namespace) -> int:
     else:
         cell_id = str(cell_id_override)
     artifact_dir = runs_root / cell_id
-
-    guest_rel = None
-    try:
-        guest_rel = str(artifact_dir.resolve().relative_to(workspace_root.resolve()))
-    except ValueError:
-        guest_rel = None
+    guest_rel = _artifact_guest_relpath(artifact_dir, args.share_dir, workspace_root)
 
     profile_doc.setdefault("workload_timeout_s", args.workload_timeout)
     profile_doc["guest_artifact_relpath"] = guest_rel

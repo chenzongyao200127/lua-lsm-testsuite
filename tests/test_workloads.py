@@ -342,6 +342,49 @@ class UnixBenchPolicyBracketTests(unittest.TestCase):
                 ctx.commands[2],
             )
 
+    def test_unixbench_policy_none_skips_register_and_unregister(self):
+        with TemporaryDirectory() as td:
+            ctx = self._ctx(
+                Path(td),
+                profile={"guest_artifact_relpath": "runs/x/cell",
+                         "policy": "none"},
+            )
+            fake = ssh.SshResult(returncode=0, stdout="", stderr="")
+            with patch.object(ssh, "run", return_value=fake):
+                r = workloads.unixbench(ctx.target, ctx)
+            self.assertEqual(r.returncode, 0)
+            self.assertEqual(
+                len(ctx.commands), 1,
+                "policy=none must run only the UnixBench wrapper",
+            )
+            self.assertIn("lua_lsm_unixbench.sh", ctx.commands[0])
+            self.assertNotIn("/sys/kernel/security/lua/register", ctx.commands[0])
+            self.assertNotIn("/sys/kernel/security/lua/unregister", ctx.commands[0])
+
+    def test_unixbench_guest_local_stages_tree_under_tmp(self):
+        with TemporaryDirectory() as td:
+            ctx = self._ctx(
+                Path(td),
+                profile={
+                    "guest_artifact_relpath": "runs/x/cell",
+                    "policy": "none",
+                    "unixbench_guest_local": True,
+                },
+            )
+            fake = ssh.SshResult(returncode=0, stdout="", stderr="")
+            with patch.object(ssh, "run", return_value=fake), \
+                 patch.object(ssh, "fetch_text", return_value=None):
+                r = workloads.unixbench(ctx.target, ctx)
+            self.assertEqual(r.returncode, 0)
+            self.assertEqual(
+                len(ctx.commands), 2,
+                "guest-local unixbench must issue exactly two commands: stage + wrapper",
+            )
+            self.assertIn("cp -a /mnt/host/unixbench /tmp/c1-unixbench", ctx.commands[0])
+            self.assertIn("lua_lsm_unixbench.sh", ctx.commands[1])
+            self.assertIn("-d /tmp/c1-unixbench", ctx.commands[1])
+            self.assertIn("-o /tmp/c1-lua-lsm-unixbench", ctx.commands[1])
+
     def test_unixbench_unregisters_even_when_wrapper_fails(self):
         """Invariant: a wrapper failure must NOT leak a registered policy
         into the next cell. The unregister step is always issued once

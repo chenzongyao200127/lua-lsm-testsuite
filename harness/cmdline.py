@@ -3,7 +3,7 @@
 Profile shape (Python dict):
 
     {
-        "kind": "perf" | "bughunt",          # required
+        "kind": "perf" | "bughunt" | "bench", # required
         "lsm": "capability,yama,lua,...",     # optional; appended verbatim if present
         "lvm_pool_max": int | None,           # optional; only emitted if not None
         "nodebug": bool,                      # optional; default False
@@ -20,7 +20,7 @@ from __future__ import annotations
 from typing import Iterable, Mapping, MutableMapping
 
 BUGHUNT_KNOBS = ("panic_on_warn=1", "panic=-1", "oops=panic")
-VALID_KINDS = ("perf", "bughunt")
+VALID_KINDS = ("perf", "bughunt", "bench")
 
 
 class CmdlineError(ValueError):
@@ -43,11 +43,11 @@ def compose(profile: Mapping) -> str:
     extra: Iterable[str] = profile.get("extra") or ()
     extra_list = list(extra)
 
-    if kind == "perf":
+    if kind in ("perf", "bench"):
         for knob in BUGHUNT_KNOBS:
             if any(knob in tok for tok in extra_list):
                 raise CmdlineError(
-                    f"perf cell carries bug-hunt knob {knob!r}; refuse to start "
+                    f"{kind} cell carries bug-hunt knob {knob!r}; refuse to start "
                     "(perf timing must not be distorted by panic_on_warn/oops=panic)"
                 )
 
