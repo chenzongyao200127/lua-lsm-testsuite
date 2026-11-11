@@ -40,10 +40,15 @@ runner.
 
 1. Keep the existing harness behavior stable while documenting the boundaries
    and result contracts.
-2. Split the large CLI module into small command modules without changing the
-   public command surface.
-3. Make fixtures self-contained in this repository and remove the dependency on
-   the sibling `lua-lsm-tools` checkout for load-bearing test policies.
+2. ~~Split the large CLI module into small command modules without changing the
+   public command surface.~~ Done: `harness/cli/` (parser + one module per
+   subcommand + shared helpers); `harness/__main__.py` is a thin entrypoint
+   shim. Exit-code contracts live in `harness/ksft.py` (run/matrix) and
+   `harness/bisect.py` (bisect-run).
+3. ~~Make fixtures self-contained in this repository and remove the dependency on
+   the sibling `lua-lsm-tools` checkout for load-bearing test policies.~~ Done:
+   self-contained policies live under `fixtures/policies/`; workload
+   registration has a single source of truth (`workloads.SPECS`).
 4. Replace historical acceptance-plan language with case names and explicit
    assertions.
 5. Add a workspace inventory/doctor command before changing path defaults.

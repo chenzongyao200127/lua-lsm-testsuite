@@ -132,15 +132,39 @@ recorded in `docs/EBPF_GUARDRAILS.md`.
 
 ## Development
 
+The project is uv-managed; the dev environment brings pytest, pytest-cov,
+and ruff. The Makefile is the front door:
+
 ```sh
 # Install or refresh the local development environment.
 make sync
 
-# Run the test suite via pytest (pytest collects the existing unittest tests).
+# Run the full test suite.
 make test
+
+# Fast gate: everything except the script-pinning tests (marked slow).
+uv run python -m pytest -q -m "not slow"
+
+# Lint and format.
+make lint
+uv run ruff format .
+
+# Test coverage report (branch coverage over harness/).
+make cov
+
+# Built-in classifier/signature self-tests.
+make selftest
 
 # Remove local harness outputs and Python cache files.
 make clean
+```
+
+Sanity-check a matrix config without touching QEMU — planning is pure:
+
+```sh
+uv run python -c "from pathlib import Path; from harness import matrix; \
+print(len(matrix.plan_from_file(Path('configs/smoke.yaml')).cells))"
+# -> 32
 ```
 
 ## Plan reference
