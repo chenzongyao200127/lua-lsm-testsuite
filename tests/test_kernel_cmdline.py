@@ -1,6 +1,6 @@
 import unittest
 
-from harness.cmdline import (
+from harness.kernel_cmdline import (
     BUGHUNT_KNOBS,
     CmdlineError,
     compose,

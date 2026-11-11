@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 
 from .. import cell_runner, matrix, qemu, schemas, ssh
-from ..cmdline import compose_env
+from ..kernel_cmdline import compose_env
 from ..ksft import KSFT_FAIL, KSFT_PASS, KSFT_SKIP
 from . import common
 

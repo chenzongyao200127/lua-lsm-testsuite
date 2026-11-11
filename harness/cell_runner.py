@@ -37,8 +37,8 @@ from . import (
     workloads,
 )
 from .celltypes import CellContext, WorkloadFn, WorkloadResult
-from .cmdline import compose_env
 from .hostenv import HostEnv, cell_kvm_check, detect
+from .kernel_cmdline import compose_env
 from .timeutil import now_iso
 
 __all__ = [
