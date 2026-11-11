@@ -10,28 +10,12 @@ out as load-bearing for AC-1 / AC-7 / AC-6.1.
 from __future__ import annotations
 
 import json
-import os
-import unittest
 from pathlib import Path
-from tempfile import TemporaryDirectory
-from unittest import mock
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
+import pytest
 from harness import __main__ as cli
 from harness import bisect, cell_runner, hostenv, qemu, schemas, ssh
-
-
-def _fake_handle(pid: int = 4242) -> qemu.QemuHandle:
-    proc = MagicMock()
-    proc.pid = pid
-    proc.poll.return_value = 0
-    proc.returncode = 0
-    return qemu.QemuHandle(
-        proc=proc,
-        serial_log_path=Path("/tmp/serial.log"),
-        pgid=pid,
-        started_at=0.0,
-    )
 
 
 def _fake_ssh_run(target, cmd, timeout_s=120.0):
@@ -39,292 +23,240 @@ def _fake_ssh_run(target, cmd, timeout_s=120.0):
     return ssh.SshResult(returncode=0, stdout="ok\n", stderr="")
 
 
-class _PatchHostEnv:
-    """Force hostenv.detect() to report Linux+KVM regardless of the test host."""
-
-    def __enter__(self):
-        self._patch = patch.object(
-            hostenv,
-            "detect",
-            return_value=hostenv.HostEnv(system="Linux", release="6.10.0", has_kvm=True),
-        )
-        self._patch.start()
-        return self
-
-    def __exit__(self, *exc):
-        self._patch.stop()
+def _smoke_config() -> Path:
+    return Path(__file__).resolve().parent.parent / "configs" / "smoke.json"
 
 
-class PolicyPathTests(unittest.TestCase):
-    def test_functional_policy_resolves_to_repository_fixture(self):
-        with TemporaryDirectory() as td:
-            share_dir = Path(td)
-            paths = cli._resolve_policy_paths(share_dir, "smoke", "functional")
-            self.assertEqual(
-                paths,
-                (share_dir / "lua-lsm-testsuite" / "fixtures" / "policies" / "smoke.lua",),
-            )
+def test_functional_policy_resolves_to_repository_fixture(tmp_path):
+    paths = cli._resolve_policy_paths(tmp_path, "smoke", "functional")
+    assert paths == (tmp_path / "lua-lsm-testsuite" / "fixtures" / "policies" / "smoke.lua",)
 
 
-class CliRunTests(unittest.TestCase):
-    def test_run_help_does_not_touch_host(self):
-        with self.assertRaises(SystemExit) as cm:
-            cli.main(["--help"])
-        self.assertEqual(cm.exception.code, 0)
-
-    def test_run_writes_cell_json_before_boot_attempt(self):
-        with TemporaryDirectory() as td:
-            tdp = Path(td)
-            args = [
-                "run",
-                "--workload",
-                "smoke",
-                "--kind",
-                "bughunt",
-                "--no-kvm",
-                "--ssh-key",
-                "/dev/null",
-                "--launcher",
-                "/nonexistent/launcher.sh",
-                "--runs-root",
-                str(tdp / "runs"),
-                "--boot-timeout",
-                "1.0",
-            ]
-            with (
-                _PatchHostEnv(),
-                patch.object(qemu, "spawn", side_effect=qemu.QemuLaunchError("missing")),
-                patch.object(ssh, "wait_for_ssh", return_value=False),
-                patch.object(ssh, "run", side_effect=_fake_ssh_run),
-            ):
-                # KVM not required, so the runner should still spawn (and our
-                # mock raises). The cell.json must land regardless.
-                rc = cli.main(args)
-            self.assertNotEqual(rc, cli.KSFT_PASS)
-            cell_dirs = list((tdp / "runs").glob("*"))
-            self.assertEqual(len(cell_dirs), 1)
-            cell_dir = cell_dirs[0]
-            self.assertTrue(
-                (cell_dir / "cell.json").exists(),
-                "cell.json must be written before any boot attempt",
-            )
-            cell_json = json.loads((cell_dir / "cell.json").read_text())
-            self.assertEqual(cell_json["workload"], "smoke")
-
-    def test_run_smoke_pass_emits_result_json_with_pass_verdict(self):
-        with TemporaryDirectory() as td:
-            tdp = Path(td)
-            args = [
-                "run",
-                "--workload",
-                "smoke",
-                "--kind",
-                "bughunt",
-                "--no-kvm",
-                "--ssh-key",
-                "/dev/null",
-                "--launcher",
-                "/nonexistent/launcher.sh",
-                "--runs-root",
-                str(tdp / "runs"),
-                "--boot-timeout",
-                "1.0",
-            ]
-            with (
-                _PatchHostEnv(),
-                patch.object(qemu, "spawn", return_value=_fake_handle()),
-                patch.object(qemu, "stop", return_value=0),
-                patch.object(ssh, "wait_for_ssh", return_value=True),
-                patch.object(ssh, "run", side_effect=_fake_ssh_run),
-                patch.object(ssh, "fetch_text", return_value=None),
-            ):
-                # Make the runner write a serial.log (would normally be QEMU's
-                # job) so classifier has *something* to inspect.
-
-                # Stage a non-empty serial.log into each prospective dir BEFORE
-                # the runner starts: simplest is to monkey-patch qemu.spawn
-                # to write the log itself.
-                def _spawn_with_log(launcher, env, serial_log_path, cwd=None, **kwargs):
-                    serial_log_path.parent.mkdir(parents=True, exist_ok=True)
-                    serial_log_path.write_text("[    0.000] Linux version 6.10\n")
-                    return _fake_handle()
-
-                with patch.object(qemu, "spawn", side_effect=_spawn_with_log):
-                    rc = cli.main(args)
-            self.assertEqual(rc, cli.KSFT_PASS)
-            cell_dirs = list((tdp / "runs").glob("*"))
-            self.assertEqual(len(cell_dirs), 1)
-            result = json.loads((cell_dirs[0] / "result.json").read_text())
-            self.assertEqual(result["verdict"], "pass")
-            self.assertGreaterEqual(
-                len(result.get("commands") or []),
-                1,
-                "result.json must list the guest commands the workload ran",
-            )
+def test_run_help_does_not_touch_host():
+    with pytest.raises(SystemExit) as ctx:
+        cli.main(["--help"])
+    assert ctx.value.code == 0
 
 
-class CliMatrixTests(unittest.TestCase):
-    def _smoke_config(self) -> Path:
-        return Path(__file__).resolve().parent.parent / "configs" / "smoke.json"
+def test_run_writes_cell_json_before_boot_attempt(tmp_path, linux_host, monkeypatch):
+    args = [
+        "run",
+        "--workload",
+        "smoke",
+        "--kind",
+        "bughunt",
+        "--no-kvm",
+        "--ssh-key",
+        "/dev/null",
+        "--launcher",
+        "/nonexistent/launcher.sh",
+        "--runs-root",
+        str(tmp_path / "runs"),
+        "--boot-timeout",
+        "1.0",
+    ]
 
-    def test_matrix_rejects_share_dir_without_required_entries(self):
-        with TemporaryDirectory() as td:
-            tdp = Path(td)
-            (tdp / "kernel" / "linux").mkdir(parents=True)
-            # lua-lsm-tools is missing -> assert_share_dir refuses.
-            with _PatchHostEnv():
-                rc = cli.main(
-                    [
-                        "matrix",
-                        "--config",
-                        str(self._smoke_config()),
-                        "--share-dir",
-                        str(tdp),
-                        "--runs-root",
-                        str(tdp / "runs"),
-                    ]
-                )
-            self.assertEqual(rc, cli.KSFT_FAIL)
+    def _boom(*_a, **_kw):
+        raise qemu.QemuLaunchError("missing")
 
-    def test_matrix_dispatches_each_cell_with_distinct_port(self):
-        with TemporaryDirectory() as td:
-            tdp = Path(td)
-            seen_ports: list[int] = []
-            seen_cells: list[str] = []
-
-            def _stub_run_cell(inputs, host=None):
-                seen_ports.append(inputs.ssh_target.port)
-                seen_cells.append(inputs.cell_id)
-                inputs.artifact_dir.mkdir(parents=True, exist_ok=True)
-                # Synthesize a minimal pass result so totals aggregate cleanly.
-                result = {
-                    "schema_version": 1,
-                    "cell_id": inputs.cell_id,
-                    "verdict": "pass",
-                    "started_at": "2026-05-27T00:00:00+00:00",
-                    "finished_at": "2026-05-27T00:00:01+00:00",
-                }
-                (inputs.artifact_dir / "result.json").write_text(json.dumps(result))
-                return result
-
-            args = [
-                "matrix",
-                "--config",
-                str(self._smoke_config()),
-                "--ssh-key",
-                "/dev/null",
-                "--launcher",
-                "/nonexistent/launcher.sh",
-                "--runs-root",
-                str(tdp / "runs"),
-                "--port-base",
-                "11000",
-                "--parallel",
-                "1",
-            ]
-            with _PatchHostEnv(), patch.object(cell_runner, "run_cell", side_effect=_stub_run_cell):
-                rc = cli.main(args)
-            self.assertEqual(rc, cli.KSFT_PASS)
-            # 32 cells, 32 distinct ports starting at 11000.
-            self.assertEqual(len(seen_ports), 32)
-            self.assertEqual(len(set(seen_ports)), 32)
-            self.assertEqual(min(seen_ports), 11000)
-            self.assertEqual(max(seen_ports), 11031)
-
-            # matrix.json was written.
-            mj = list((tdp / "runs").rglob("matrix.json"))
-            self.assertEqual(len(mj), 1)
-            doc = json.loads(mj[0].read_text())
-            self.assertEqual(doc["totals"]["passed"], 32)
-
-    def test_bisect_run_returns_ksft_pass_on_all_pass(self):
-        with TemporaryDirectory() as td:
-            tdp = Path(td)
-
-            def _stub_run_cell(inputs, host=None):
-                inputs.artifact_dir.mkdir(parents=True, exist_ok=True)
-                result = {
-                    "schema_version": 1,
-                    "cell_id": inputs.cell_id,
-                    "verdict": "pass",
-                    "started_at": None,
-                    "finished_at": None,
-                }
-                (inputs.artifact_dir / "result.json").write_text(json.dumps(result))
-                return result
-
-            args = [
-                "bisect-run",
-                "--config",
-                str(self._smoke_config()),
-                "--ssh-key",
-                "/dev/null",
-                "--launcher",
-                "/nonexistent/launcher.sh",
-                "--runs-root",
-                str(tdp / "runs"),
-                "--port-base",
-                "12000",
-            ]
-            with _PatchHostEnv(), patch.object(cell_runner, "run_cell", side_effect=_stub_run_cell):
-                rc = cli.main(args)
-            self.assertEqual(rc, bisect.KSFT_PASS)
-
-    def test_bisect_run_returns_ksft_fail_when_a_cell_fails(self):
-        with TemporaryDirectory() as td:
-            tdp = Path(td)
-
-            def _stub_run_cell(inputs, host=None):
-                inputs.artifact_dir.mkdir(parents=True, exist_ok=True)
-                # Force the first cell of the DEC-5 32-cell sweep (sorted axis
-                # keys: kconfig_profile, lvm_pool_max, policy, workload) to
-                # kernel-bug; the rest pass.
-                verdict = "kernel-bug" if "full-0-denyfile-smoke" in inputs.cell_id else "pass"
-                result = {
-                    "schema_version": 1,
-                    "cell_id": inputs.cell_id,
-                    "verdict": verdict,
-                    "started_at": None,
-                    "finished_at": None,
-                }
-                (inputs.artifact_dir / "result.json").write_text(json.dumps(result))
-                return result
-
-            args = [
-                "bisect-run",
-                "--config",
-                str(self._smoke_config()),
-                "--ssh-key",
-                "/dev/null",
-                "--launcher",
-                "/nonexistent/launcher.sh",
-                "--runs-root",
-                str(tdp / "runs"),
-                "--port-base",
-                "13000",
-            ]
-            with _PatchHostEnv(), patch.object(cell_runner, "run_cell", side_effect=_stub_run_cell):
-                rc = cli.main(args)
-            self.assertEqual(rc, bisect.KSFT_FAIL)
+    monkeypatch.setattr(qemu, "spawn", _boom)
+    monkeypatch.setattr(ssh, "wait_for_ssh", lambda *a, **kw: False)
+    monkeypatch.setattr(ssh, "run", _fake_ssh_run)
+    # KVM not required, so the runner should still spawn (and our
+    # mock raises). The cell.json must land regardless.
+    rc = cli.main(args)
+    assert rc != cli.KSFT_PASS
+    cell_dirs = list((tmp_path / "runs").glob("*"))
+    assert len(cell_dirs) == 1
+    cell_dir = cell_dirs[0]
+    assert (cell_dir / "cell.json").exists(), "cell.json must be written before any boot attempt"
+    cell_json = json.loads((cell_dir / "cell.json").read_text())
+    assert cell_json["workload"] == "smoke"
 
 
-class CliImageWarmTests(unittest.TestCase):
-    def test_image_warm_writes_marker(self):
-        with TemporaryDirectory() as td:
-            tdp = Path(td)
-            image = tdp / "rootfs.img"
-            image.write_text("fake")
-            rc = cli.main(["image-warm", "--image", str(image)])
-            self.assertEqual(rc, cli.KSFT_PASS)
-            marker = image.with_suffix(".img.warm-marker")
-            self.assertTrue(marker.exists())
+def test_run_smoke_pass_emits_result_json_with_pass_verdict(
+    tmp_path, linux_host, monkeypatch, fake_qemu_handle
+):
+    args = [
+        "run",
+        "--workload",
+        "smoke",
+        "--kind",
+        "bughunt",
+        "--no-kvm",
+        "--ssh-key",
+        "/dev/null",
+        "--launcher",
+        "/nonexistent/launcher.sh",
+        "--runs-root",
+        str(tmp_path / "runs"),
+        "--boot-timeout",
+        "1.0",
+    ]
+    monkeypatch.setattr(qemu, "stop", lambda *a, **kw: 0)
+    monkeypatch.setattr(ssh, "wait_for_ssh", lambda *a, **kw: True)
+    monkeypatch.setattr(ssh, "run", _fake_ssh_run)
+    monkeypatch.setattr(ssh, "fetch_text", lambda *a, **kw: None)
 
-    def test_image_warm_missing_image_returns_fail(self):
-        rc = cli.main(["image-warm", "--image", "/nonexistent/rootfs.img"])
-        self.assertEqual(rc, cli.KSFT_FAIL)
+    # Make the runner write a serial.log (would normally be QEMU's job) so
+    # the classifier has *something* to inspect: qemu.spawn writes the log.
+    def _spawn_with_log(launcher, env, serial_log_path, cwd=None, **kwargs):
+        serial_log_path.parent.mkdir(parents=True, exist_ok=True)
+        serial_log_path.write_text("[    0.000] Linux version 6.10\n")
+        return fake_qemu_handle()
+
+    monkeypatch.setattr(qemu, "spawn", _spawn_with_log)
+    rc = cli.main(args)
+    assert rc == cli.KSFT_PASS
+    cell_dirs = list((tmp_path / "runs").glob("*"))
+    assert len(cell_dirs) == 1
+    result = json.loads((cell_dirs[0] / "result.json").read_text())
+    assert result["verdict"] == "pass"
+    assert len(result.get("commands") or []) >= 1, (
+        "result.json must list the guest commands the workload ran"
+    )
 
 
-class CliNoKvmEnvOverrideTests(unittest.TestCase):
+def test_matrix_rejects_share_dir_without_required_entries(tmp_path, linux_host):
+    (tmp_path / "kernel" / "linux").mkdir(parents=True)
+    # lua-lsm-tools is missing -> assert_share_dir refuses.
+    rc = cli.main(
+        [
+            "matrix",
+            "--config",
+            str(_smoke_config()),
+            "--share-dir",
+            str(tmp_path),
+            "--runs-root",
+            str(tmp_path / "runs"),
+        ]
+    )
+    assert rc == cli.KSFT_FAIL
+
+
+def _pass_result_stub(inputs, host=None):
+    inputs.artifact_dir.mkdir(parents=True, exist_ok=True)
+    # Synthesize a minimal pass result so totals aggregate cleanly.
+    result = {
+        "schema_version": 1,
+        "cell_id": inputs.cell_id,
+        "verdict": "pass",
+        "started_at": "2026-05-27T00:00:00+00:00",
+        "finished_at": "2026-05-27T00:00:01+00:00",
+    }
+    (inputs.artifact_dir / "result.json").write_text(json.dumps(result))
+    return result
+
+
+def test_matrix_dispatches_each_cell_with_distinct_port(tmp_path, linux_host, monkeypatch):
+    seen_ports: list[int] = []
+    seen_cells: list[str] = []
+
+    def _stub_run_cell(inputs, host=None):
+        seen_ports.append(inputs.ssh_target.port)
+        seen_cells.append(inputs.cell_id)
+        return _pass_result_stub(inputs, host=host)
+
+    args = [
+        "matrix",
+        "--config",
+        str(_smoke_config()),
+        "--ssh-key",
+        "/dev/null",
+        "--launcher",
+        "/nonexistent/launcher.sh",
+        "--runs-root",
+        str(tmp_path / "runs"),
+        "--port-base",
+        "11000",
+        "--parallel",
+        "1",
+    ]
+    monkeypatch.setattr(cell_runner, "run_cell", _stub_run_cell)
+    rc = cli.main(args)
+    assert rc == cli.KSFT_PASS
+    # 32 cells, 32 distinct ports starting at 11000.
+    assert len(seen_ports) == 32
+    assert len(set(seen_ports)) == 32
+    assert min(seen_ports) == 11000
+    assert max(seen_ports) == 11031
+
+    # matrix.json was written.
+    mj = list((tmp_path / "runs").rglob("matrix.json"))
+    assert len(mj) == 1
+    doc = json.loads(mj[0].read_text())
+    assert doc["totals"]["passed"] == 32
+
+
+def test_bisect_run_returns_ksft_pass_on_all_pass(tmp_path, linux_host, monkeypatch):
+    monkeypatch.setattr(cell_runner, "run_cell", _pass_result_stub)
+    args = [
+        "bisect-run",
+        "--config",
+        str(_smoke_config()),
+        "--ssh-key",
+        "/dev/null",
+        "--launcher",
+        "/nonexistent/launcher.sh",
+        "--runs-root",
+        str(tmp_path / "runs"),
+        "--port-base",
+        "12000",
+    ]
+    rc = cli.main(args)
+    assert rc == bisect.KSFT_PASS
+
+
+def test_bisect_run_returns_ksft_fail_when_a_cell_fails(tmp_path, linux_host, monkeypatch):
+    def _stub_run_cell(inputs, host=None):
+        inputs.artifact_dir.mkdir(parents=True, exist_ok=True)
+        # Force the first cell of the DEC-5 32-cell sweep (sorted axis
+        # keys: kconfig_profile, lvm_pool_max, policy, workload) to
+        # kernel-bug; the rest pass.
+        verdict = "kernel-bug" if "full-0-denyfile-smoke" in inputs.cell_id else "pass"
+        result = {
+            "schema_version": 1,
+            "cell_id": inputs.cell_id,
+            "verdict": verdict,
+            "started_at": None,
+            "finished_at": None,
+        }
+        (inputs.artifact_dir / "result.json").write_text(json.dumps(result))
+        return result
+
+    monkeypatch.setattr(cell_runner, "run_cell", _stub_run_cell)
+    args = [
+        "bisect-run",
+        "--config",
+        str(_smoke_config()),
+        "--ssh-key",
+        "/dev/null",
+        "--launcher",
+        "/nonexistent/launcher.sh",
+        "--runs-root",
+        str(tmp_path / "runs"),
+        "--port-base",
+        "13000",
+    ]
+    rc = cli.main(args)
+    assert rc == bisect.KSFT_FAIL
+
+
+def test_image_warm_writes_marker(tmp_path):
+    image = tmp_path / "rootfs.img"
+    image.write_text("fake")
+    rc = cli.main(["image-warm", "--image", str(image)])
+    assert rc == cli.KSFT_PASS
+    marker = image.with_suffix(".img.warm-marker")
+    assert marker.exists()
+
+
+def test_image_warm_missing_image_returns_fail():
+    rc = cli.main(["image-warm", "--image", "/nonexistent/rootfs.img"])
+    assert rc == cli.KSFT_FAIL
+
+
+class TestCliNoKvmEnvOverride:
     """The LUA_LSM_TESTSUITE_KVM_PATH env var is the supported test hook
     that lets the harness produce a real `skip:no-kvm` verdict on a host
     that happens to have /dev/kvm. The dry-run script's Step 5 uses this
@@ -332,7 +264,7 @@ class CliNoKvmEnvOverrideTests(unittest.TestCase):
     requirement on the cell.
     """
 
-    def test_env_override_produces_skip_no_kvm_without_qemu_spawn(self):
+    def test_env_override_produces_skip_no_kvm_without_qemu_spawn(self, tmp_path, monkeypatch):
         """End-to-end CLI run: env override + kvm_required=True (default)
         must write verdict=skip:no-kvm to result.json and never spawn QEMU.
         """
@@ -347,52 +279,47 @@ class CliNoKvmEnvOverrideTests(unittest.TestCase):
             # the env var lookup) flows through the real detect().
             return real_detect(system_override="Linux")
 
-        with TemporaryDirectory() as td:
-            tdp = Path(td)
-            args = [
-                "run",
-                "--workload",
-                "smoke",
-                "--kind",
-                "bughunt",
-                # Deliberately NOT passing --no-kvm: kvm_required stays True,
-                # so this exercises the real AC-9 skip:no-kvm branch.
-                "--ssh-key",
-                "/dev/null",
-                "--launcher",
-                "/nonexistent/launcher.sh",
-                "--runs-root",
-                str(tdp / "runs"),
-                "--boot-timeout",
-                "1.0",
-            ]
+        args = [
+            "run",
+            "--workload",
+            "smoke",
+            "--kind",
+            "bughunt",
+            # Deliberately NOT passing --no-kvm: kvm_required stays True,
+            # so this exercises the real AC-9 skip:no-kvm branch.
+            "--ssh-key",
+            "/dev/null",
+            "--launcher",
+            "/nonexistent/launcher.sh",
+            "--runs-root",
+            str(tmp_path / "runs"),
+            "--boot-timeout",
+            "1.0",
+        ]
 
-            def _fail_if_called(*a, **kw):
-                raise AssertionError(
-                    "qemu.spawn must NOT be invoked when the env override "
-                    "drives the runner into the skip:no-kvm branch"
-                )
+        def _fail_if_called(*a, **kw):
+            raise AssertionError(
+                "qemu.spawn must NOT be invoked when the env override "
+                "drives the runner into the skip:no-kvm branch"
+            )
 
-            env_patch = {hostenv.KVM_PATH_ENV: "/nonexistent/kvm/path"}
-            # Patch BOTH the module-level hostenv.detect (used by CLI's
-            # _enforce_supported_host) AND the copy imported into
-            # cell_runner.run_cell at import time. Both must honor the env
-            # var via the real detect() forwarder above.
-            with (
-                mock.patch.dict(os.environ, env_patch, clear=False),
-                patch.object(hostenv, "detect", side_effect=_detect_linux_honoring_env),
-                patch.object(cell_runner, "detect", side_effect=_detect_linux_honoring_env),
-                patch.object(qemu, "spawn", side_effect=_fail_if_called),
-            ):
-                cli.main(args)
+        monkeypatch.setenv(hostenv.KVM_PATH_ENV, "/nonexistent/kvm/path")
+        # Patch BOTH the module-level hostenv.detect (used by CLI's
+        # _enforce_supported_host) AND the copy imported into
+        # cell_runner.run_cell at import time. Both must honor the env
+        # var via the real detect() forwarder above.
+        monkeypatch.setattr(hostenv, "detect", _detect_linux_honoring_env)
+        monkeypatch.setattr(cell_runner, "detect", _detect_linux_honoring_env)
+        monkeypatch.setattr(qemu, "spawn", _fail_if_called)
+        cli.main(args)
 
-            cell_dirs = list((tdp / "runs").glob("*"))
-            self.assertEqual(len(cell_dirs), 1)
-            result = json.loads((cell_dirs[0] / "result.json").read_text())
-            self.assertEqual(result["verdict"], "skip:no-kvm")
-            self.assertIn("/dev/kvm", result.get("reason", ""))
+        cell_dirs = list((tmp_path / "runs").glob("*"))
+        assert len(cell_dirs) == 1
+        result = json.loads((cell_dirs[0] / "result.json").read_text())
+        assert result["verdict"] == "skip:no-kvm"
+        assert "/dev/kvm" in result.get("reason", "")
 
-    def test_no_env_override_with_kvm_required_still_attempts_spawn(self):
+    def test_no_env_override_with_kvm_required_still_attempts_spawn(self, tmp_path, monkeypatch):
         """Negative control: with the env override UNSET on a (mocked)
         Linux host that has /dev/kvm, the same CLI args proceed past the
         skip:no-kvm gate and reach qemu.spawn. This proves the env override
@@ -405,219 +332,190 @@ class CliNoKvmEnvOverrideTests(unittest.TestCase):
             # so cell_runner.run_cell does not short-circuit on skip:no-kvm.
             return real_detect(system_override="Linux", kvm_path="/dev/null")
 
-        with TemporaryDirectory() as td:
-            tdp = Path(td)
-            args = [
-                "run",
-                "--workload",
-                "smoke",
-                "--kind",
-                "bughunt",
-                "--ssh-key",
-                "/dev/null",
-                "--launcher",
-                "/nonexistent/launcher.sh",
-                "--runs-root",
-                str(tdp / "runs"),
-                "--boot-timeout",
-                "1.0",
-            ]
-            spawn_called = {"v": False}
+        args = [
+            "run",
+            "--workload",
+            "smoke",
+            "--kind",
+            "bughunt",
+            "--ssh-key",
+            "/dev/null",
+            "--launcher",
+            "/nonexistent/launcher.sh",
+            "--runs-root",
+            str(tmp_path / "runs"),
+            "--boot-timeout",
+            "1.0",
+        ]
+        spawn_called = {"v": False}
 
-            def _record_and_fail(*a, **kw):
-                spawn_called["v"] = True
-                raise qemu.QemuLaunchError("test stop")
+        def _record_and_fail(*a, **kw):
+            spawn_called["v"] = True
+            raise qemu.QemuLaunchError("test stop")
 
-            # Ensure the env var is NOT set during this test even if the
-            # caller's env happens to define it.
-            env_strip = {k: v for k, v in os.environ.items() if k != hostenv.KVM_PATH_ENV}
-            with (
-                mock.patch.dict(os.environ, env_strip, clear=True),
-                patch.object(hostenv, "detect", side_effect=_detect_linux_with_kvm),
-                patch.object(cell_runner, "detect", side_effect=_detect_linux_with_kvm),
-                patch.object(qemu, "spawn", side_effect=_record_and_fail),
-                patch.object(ssh, "wait_for_ssh", return_value=False),
-                patch.object(ssh, "run", side_effect=_fake_ssh_run),
-            ):
-                cli.main(args)
-            self.assertTrue(
-                spawn_called["v"],
-                "without env override + with KVM present, the runner must reach qemu.spawn",
-            )
+        # Ensure the env var is NOT set during this test even if the
+        # caller's env happens to define it.
+        monkeypatch.delenv(hostenv.KVM_PATH_ENV, raising=False)
+        monkeypatch.setattr(hostenv, "detect", _detect_linux_with_kvm)
+        monkeypatch.setattr(cell_runner, "detect", _detect_linux_with_kvm)
+        monkeypatch.setattr(qemu, "spawn", _record_and_fail)
+        monkeypatch.setattr(ssh, "wait_for_ssh", lambda *a, **kw: False)
+        monkeypatch.setattr(ssh, "run", _fake_ssh_run)
+        cli.main(args)
+        assert spawn_called["v"], (
+            "without env override + with KVM present, the runner must reach qemu.spawn"
+        )
 
 
-class CliHostRefusalTests(unittest.TestCase):
-    def test_run_refuses_darwin_at_planning_time(self):
-        with TemporaryDirectory() as td:
-            tdp = Path(td)
-            args = [
-                "run",
-                "--workload",
-                "smoke",
-                "--kind",
-                "bughunt",
-                "--no-kvm",
-                "--ssh-key",
-                "/dev/null",
-                "--launcher",
-                "/nonexistent/launcher.sh",
-                "--runs-root",
-                str(tdp / "runs"),
-            ]
-            with (
-                patch.object(
-                    hostenv,
-                    "detect",
-                    return_value=hostenv.HostEnv(system="Darwin", release="25.3.0", has_kvm=False),
-                ),
-                self.assertRaises(hostenv.UnsupportedHostError),
-            ):
-                cli.main(args)
-
-
-if __name__ == "__main__":
-    unittest.main()
+def test_run_refuses_darwin_at_planning_time(tmp_path, monkeypatch):
+    args = [
+        "run",
+        "--workload",
+        "smoke",
+        "--kind",
+        "bughunt",
+        "--no-kvm",
+        "--ssh-key",
+        "/dev/null",
+        "--launcher",
+        "/nonexistent/launcher.sh",
+        "--runs-root",
+        str(tmp_path / "runs"),
+    ]
+    monkeypatch.setattr(
+        hostenv,
+        "detect",
+        lambda: hostenv.HostEnv(system="Darwin", release="25.3.0", has_kvm=False),
+    )
+    with pytest.raises(hostenv.UnsupportedHostError):
+        cli.main(args)
 
 
 # ---------------------------------------------------------------------------
-# Moved verbatim from tests/test_round2.py (round-2 dissolution).
+# Moved from tests/test_round2.py (round-2 dissolution), now pytest-style.
 # ---------------------------------------------------------------------------
 
 
-class CliDetachVmTests(unittest.TestCase):
-    def test_detach_vm_prints_pid_and_port_skips_workload_and_result_json(self):
-        with TemporaryDirectory() as td:
-            tdp = Path(td)
-            args = [
-                "run",
-                "--workload",
-                "smoke",
-                "--kind",
-                "bughunt",
-                "--no-kvm",
-                "--ssh-key",
-                "/dev/null",
-                "--launcher",
-                "/nonexistent/launcher.sh",
-                "--runs-root",
-                str(tdp / "runs"),
-                "--boot-timeout",
-                "1.0",
-                "--ssh-port",
-                "10099",
-                "--detach-vm",
-            ]
-            workload_called = MagicMock()
-            with (
-                _PatchHostEnv(),
-                patch.object(qemu, "spawn", return_value=_fake_handle(pid=7777)) as spawn_mock,
-                patch.object(qemu, "stop", return_value=0) as stop_mock,
-                patch.object(ssh, "wait_for_ssh", return_value=True),
-                patch.object(ssh, "run", side_effect=_fake_ssh_run),
-                patch("harness.workloads.by_name", return_value=workload_called),
-                patch("sys.stdout") as stdout_mock,
-            ):
-                rc = cli.main(args)
+def test_detach_vm_prints_pid_and_port_skips_workload_and_result_json(
+    tmp_path, linux_host, monkeypatch, fake_qemu_handle, capsys
+):
+    args = [
+        "run",
+        "--workload",
+        "smoke",
+        "--kind",
+        "bughunt",
+        "--no-kvm",
+        "--ssh-key",
+        "/dev/null",
+        "--launcher",
+        "/nonexistent/launcher.sh",
+        "--runs-root",
+        str(tmp_path / "runs"),
+        "--boot-timeout",
+        "1.0",
+        "--ssh-port",
+        "10099",
+        "--detach-vm",
+    ]
+    workload_called = MagicMock()
+    spawn_mock = MagicMock(return_value=fake_qemu_handle(pid=7777))
+    stop_mock = MagicMock(return_value=0)
+    monkeypatch.setattr(qemu, "spawn", spawn_mock)
+    monkeypatch.setattr(qemu, "stop", stop_mock)
+    monkeypatch.setattr(ssh, "wait_for_ssh", lambda *a, **kw: True)
+    monkeypatch.setattr(ssh, "run", _fake_ssh_run)
+    monkeypatch.setattr("harness.workloads.by_name", lambda _name: workload_called)
+    rc = cli.main(args)
 
-            self.assertEqual(rc, cli.KSFT_PASS)
-            spawn_mock.assert_called_once()
-            stop_mock.assert_not_called()
-            workload_called.assert_not_called()
+    assert rc == cli.KSFT_PASS
+    spawn_mock.assert_called_once()
+    stop_mock.assert_not_called()
+    workload_called.assert_not_called()
 
-            cell_dirs = list((tdp / "runs").glob("*"))
-            self.assertEqual(len(cell_dirs), 1)
-            cell_dir = cell_dirs[0]
-            self.assertTrue((cell_dir / "cell.json").exists())
-            self.assertTrue((cell_dir / "extra-cmdline.txt").exists())
-            self.assertTrue((cell_dir / "qemu-cmdline.txt").exists())
-            self.assertFalse(
-                (cell_dir / "result.json").exists(), "--detach-vm must not finalize result.json"
-            )
+    cell_dirs = list((tmp_path / "runs").glob("*"))
+    assert len(cell_dirs) == 1
+    cell_dir = cell_dirs[0]
+    assert (cell_dir / "cell.json").exists()
+    assert (cell_dir / "extra-cmdline.txt").exists()
+    assert (cell_dir / "qemu-cmdline.txt").exists()
+    assert not (cell_dir / "result.json").exists(), "--detach-vm must not finalize result.json"
 
-            stdout_writes = "".join(
-                str(c.args[0]) if c.args else "" for c in stdout_mock.write.call_args_list
-            )
-            self.assertIn("pid=7777", stdout_writes)
-            self.assertIn("ssh_port=10099", stdout_writes)
+    stdout_writes = capsys.readouterr().out
+    assert "pid=7777" in stdout_writes
+    assert "ssh_port=10099" in stdout_writes
 
 
-class CliInteractiveTests(unittest.TestCase):
-    def test_interactive_passes_interactive_true_to_spawn_and_writes_result(self):
-        with TemporaryDirectory() as td:
-            tdp = Path(td)
-            captured_kwargs = {}
+def test_interactive_passes_interactive_true_to_spawn_and_writes_result(
+    tmp_path, linux_host, monkeypatch, fake_qemu_handle
+):
+    captured_kwargs = {}
 
-            def _spawn_capturing(launcher, env, serial_log_path, **kwargs):
-                captured_kwargs.update(kwargs)
-                serial_log_path.parent.mkdir(parents=True, exist_ok=True)
-                serial_log_path.write_text("[    0.000] Linux version 6.10\n")
-                return _fake_handle()
+    def _spawn_capturing(launcher, env, serial_log_path, **kwargs):
+        captured_kwargs.update(kwargs)
+        serial_log_path.parent.mkdir(parents=True, exist_ok=True)
+        serial_log_path.write_text("[    0.000] Linux version 6.10\n")
+        return fake_qemu_handle()
 
-            args = [
-                "run",
-                "--workload",
-                "smoke",
-                "--kind",
-                "bughunt",
-                "--no-kvm",
-                "--ssh-key",
-                "/dev/null",
-                "--launcher",
-                "/nonexistent/launcher.sh",
-                "--runs-root",
-                str(tdp / "runs"),
-                "--boot-timeout",
-                "1.0",
-                "--interactive",
-            ]
-            with (
-                _PatchHostEnv(),
-                patch.object(qemu, "spawn", side_effect=_spawn_capturing),
-                patch.object(qemu, "stop", return_value=0),
-                patch.object(ssh, "wait_for_ssh", return_value=True),
-                patch.object(ssh, "run", side_effect=_fake_ssh_run),
-                patch.object(ssh, "fetch_text", return_value=None),
-            ):
-                rc = cli.main(args)
-            self.assertEqual(rc, cli.KSFT_PASS)
-            self.assertEqual(captured_kwargs.get("interactive"), True)
-            cell_dirs = list((tdp / "runs").glob("*"))
-            self.assertEqual(len(cell_dirs), 1)
-            self.assertTrue(
-                (cell_dirs[0] / "result.json").exists(),
-                "--interactive must still write result.json at teardown",
-            )
+    args = [
+        "run",
+        "--workload",
+        "smoke",
+        "--kind",
+        "bughunt",
+        "--no-kvm",
+        "--ssh-key",
+        "/dev/null",
+        "--launcher",
+        "/nonexistent/launcher.sh",
+        "--runs-root",
+        str(tmp_path / "runs"),
+        "--boot-timeout",
+        "1.0",
+        "--interactive",
+    ]
+    monkeypatch.setattr(qemu, "spawn", _spawn_capturing)
+    monkeypatch.setattr(qemu, "stop", lambda *a, **kw: 0)
+    monkeypatch.setattr(ssh, "wait_for_ssh", lambda *a, **kw: True)
+    monkeypatch.setattr(ssh, "run", _fake_ssh_run)
+    monkeypatch.setattr(ssh, "fetch_text", lambda *a, **kw: None)
+    rc = cli.main(args)
+    assert rc == cli.KSFT_PASS
+    assert captured_kwargs.get("interactive") is True
+    cell_dirs = list((tmp_path / "runs").glob("*"))
+    assert len(cell_dirs) == 1
+    assert (cell_dirs[0] / "result.json").exists(), (
+        "--interactive must still write result.json at teardown"
+    )
 
 
-class KconfigValidationTests(unittest.TestCase):
-    def test_assert_kconfig_profile_accepts_standard_and_full(self):
-        schemas.assert_kconfig_profile("standard")
-        schemas.assert_kconfig_profile("full")
-        schemas.assert_kconfig_profile(None)
+def test_assert_kconfig_profile_accepts_standard_and_full():
+    schemas.assert_kconfig_profile("standard")
+    schemas.assert_kconfig_profile("full")
+    schemas.assert_kconfig_profile(None)
 
-    def test_assert_kconfig_profile_rejects_unknown(self):
-        with self.assertRaises(schemas.KconfigProfileError):
-            schemas.assert_kconfig_profile("debug")
 
-    def test_run_subcommand_refuses_bad_profile_before_artifact_dir(self):
-        with TemporaryDirectory() as td:
-            tdp = Path(td)
-            args = [
-                "run",
-                "--workload",
-                "smoke",
-                "--no-kvm",
-                "--ssh-key",
-                "/dev/null",
-                "--runs-root",
-                str(tdp / "runs"),
-                "--kconfig-profile",
-                "bogus",
-            ]
-            with _PatchHostEnv(), self.assertRaises(SystemExit):
-                # argparse rejects choices outside its allowed list.
-                cli.main(args)
-            self.assertFalse(
-                (tdp / "runs").exists(),
-                "no artifact dir should be created on invalid kconfig profile",
-            )
+def test_assert_kconfig_profile_rejects_unknown():
+    with pytest.raises(schemas.KconfigProfileError):
+        schemas.assert_kconfig_profile("debug")
+
+
+def test_run_subcommand_refuses_bad_profile_before_artifact_dir(tmp_path, linux_host):
+    args = [
+        "run",
+        "--workload",
+        "smoke",
+        "--no-kvm",
+        "--ssh-key",
+        "/dev/null",
+        "--runs-root",
+        str(tmp_path / "runs"),
+        "--kconfig-profile",
+        "bogus",
+    ]
+    with pytest.raises(SystemExit):
+        # argparse rejects choices outside its allowed list.
+        cli.main(args)
+    assert not (tmp_path / "runs").exists(), (
+        "no artifact dir should be created on invalid kconfig profile"
+    )
