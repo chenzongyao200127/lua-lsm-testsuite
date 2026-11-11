@@ -26,7 +26,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Mapping
 
-from . import run_registry, schemas
+from . import run_registry, schemas, workloads
 
 
 @dataclass
@@ -154,7 +154,12 @@ class ShareDirError(ValueError):
 
 
 REQUIRED_SHARE_ENTRIES = ("lua-lsm-tools", "kernel/linux")
-SELF_CONTAINED_WORKLOADS = frozenset({"functional"})
+# Workloads whose every fixture lives inside this repository's checkout;
+# derived from workloads.SPECS so the share-entry requirement can never
+# drift from the workload registration table.
+SELF_CONTAINED_WORKLOADS = frozenset(
+    spec.name for spec in workloads.SPECS.values() if spec.self_contained
+)
 
 
 def required_share_entries(workload_names: list[str]) -> tuple[str, ...]:

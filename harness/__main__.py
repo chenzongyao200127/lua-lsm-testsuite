@@ -345,11 +345,6 @@ def _make_bundle_store() -> bundle.BundleStore:
     return bundle.BundleStore()
 
 
-# Default policy file used by the `smoke` workload when --policy is not
-# specified. Resolved under <share-dir>/lua-lsm-tools/examples/.
-_DEFAULT_SMOKE_POLICY = "hello.lua"
-
-
 def _resolve_policy_paths(share_dir: Path | None, policy_name: str | None,
                           workload_name: str) -> tuple[Path, ...]:
     """Resolve the policy file(s) a cell will register, relative to share_dir.
@@ -358,23 +353,11 @@ def _resolve_policy_paths(share_dir: Path | None, policy_name: str | None,
     When share_dir is None, returns an empty tuple -- the runner can still
     proceed (the bundle just won't carry a policy copy).
 
-    The smoke workload defaults to hello.lua when --policy was not given so
-    the bundle always carries the policy the cell actually exercised.
+    Delegates to workloads.policy_host_path so host-side bundle copies and
+    guest-side registration (workloads.policy_guest_path) resolve the same
+    file from the same workload spec.
     """
-    if share_dir is None:
-        return tuple()
-    name = policy_name
-    if name is None and workload_name in ("smoke", "functional"):
-        name = _DEFAULT_SMOKE_POLICY
-    if not name:
-        return tuple()
-    filename = name if name.endswith(".lua") else f"{name}.lua"
-    if workload_name == "functional":
-        return (
-            Path(share_dir) / workloads.LUA_LSM_TESTSUITE_DIR
-            / "fixtures" / "policies" / filename,
-        )
-    return (Path(share_dir) / "lua-lsm-tools" / "examples" / filename,)
+    return workloads.policy_host_path(share_dir, workload_name, policy_name)
 
 
 def _base_env(args: argparse.Namespace,

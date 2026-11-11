@@ -18,10 +18,11 @@ from __future__ import annotations
 
 import shlex
 import shutil
+from dataclasses import dataclass
 from pathlib import Path
 
 from . import ssh
-from .cell_runner import CellContext, WorkloadResult
+from .celltypes import CellContext, WorkloadFn, WorkloadResult
 
 # Mount point inside the guest for the harness's host-side artifact share
 # (virtio-9p tag "host_share"). Workloads write logs that the harness can
@@ -47,6 +48,82 @@ DEFAULT_SMOKE_POLICY_FILE = "hello.lua"
 DEFAULT_SMOKE_POLICY_NAME = "hello"
 
 
+# ---------------------------------------------------------------------------
+# Workload registry: the single source of truth for everything the harness
+# needs to know about a workload beyond the function itself. Adding a
+# workload means adding one SPECS entry here (plus a config that selects it);
+# guest fixture requirements, policy resolution, share-dir requirements, and
+# the CLI's --workload choices all derive from this table.
+
+@dataclass(frozen=True)
+class WorkloadSpec:
+    name: str
+    fn: WorkloadFn
+    # Guest paths whose presence the cell runner verifies before invoking the
+    # workload. Empty means "no fixture required".
+    guest_fixtures: tuple[str, ...] = ()
+    # Workspace-relative directory the workload's policy files live under,
+    # guest-side (`/mnt/host/<policy_guest_dir>`) and host-side
+    # (`<share_dir>/<policy_guest_dir>`).
+    policy_guest_dir: str = LUA_LSM_TOOLS_EXAMPLES
+    # Policy used when the profile / CLI did not name one.
+    default_policy: str = DEFAULT_SMOKE_POLICY_FILE
+    # True when every fixture the workload needs lives inside this
+    # repository's checkout, so SHARE_DIR only has to contain
+    # lua-lsm-testsuite/ (see matrix.required_share_entries).
+    self_contained: bool = False
+
+
+SPECS: dict[str, WorkloadSpec] = {}  # populated after the workload functions below
+
+
+def spec_for(name: str) -> WorkloadSpec:
+    if name not in SPECS:
+        raise KeyError(f"unknown workload: {name}; known: {sorted(SPECS)}")
+    return SPECS[name]
+
+
+def normalize_policy_filename(name: str) -> str:
+    """Short names (no .lua suffix) resolve to the on-disk filename."""
+    return name if name.endswith(".lua") else f"{name}.lua"
+
+
+def policy_guest_path(workload_name: str, profile_policy: str | None) -> str:
+    """Absolute guest-side path of the policy file the workload registers.
+
+    Absolute paths (a caller passing a full path through the share) pass
+    through unchanged. Unknown workload names keep the historical
+    lua-lsm-tools/examples resolution so the eventual `by_name` lookup is
+    what reports the unknown name, not this helper.
+    """
+    spec = SPECS.get(workload_name)
+    name = profile_policy or (spec.default_policy if spec else DEFAULT_SMOKE_POLICY_FILE)
+    if "/" in name:
+        return name  # caller passed an absolute path through the share
+    guest_dir = spec.policy_guest_dir if spec else LUA_LSM_TOOLS_EXAMPLES
+    return f"{GUEST_HOST_SHARE}/{guest_dir}/{normalize_policy_filename(name)}"
+
+
+def policy_host_path(share_dir: Path | None, workload_name: str,
+                     policy_name: str | None) -> tuple[Path, ...]:
+    """Host-side policy path(s) a cell will register, relative to share_dir.
+
+    Returns a tuple of paths suitable for BundleSources.policies. When
+    share_dir is None, returns an empty tuple -- the runner can still
+    proceed (the bundle just won't carry a policy copy). The default policy
+    is workload-specific so the bundle always carries the policy the cell
+    actually exercised.
+    """
+    if share_dir is None:
+        return ()
+    spec = SPECS.get(workload_name)
+    name = policy_name or (spec.default_policy if spec else None)
+    if not name:
+        return ()
+    guest_dir = spec.policy_guest_dir if spec else LUA_LSM_TOOLS_EXAMPLES
+    return (Path(share_dir) / guest_dir / normalize_policy_filename(name),)
+
+
 def _record(result: WorkloadResult, ctx: CellContext, log_name: str,
             cmd: str, ssh_result: ssh.SshResult) -> None:
     """Append one (command, result) pair to the workload log + commands.sh."""
@@ -68,18 +145,13 @@ def _record(result: WorkloadResult, ctx: CellContext, log_name: str,
 def _policy_file_in_guest(profile_policy: str | None) -> str:
     """Return the absolute guest-side path of the policy file to register.
 
-    Short names (no .lua suffix) are normalized to the on-disk filename so
-    matrix-driven cells passing `policy: hello` resolve to `hello.lua`,
-    matching the layout under `lua-lsm-tools/examples/`. This mirrors
-    `harness/__main__.py::_resolve_policy_paths` so the in-guest path the
-    workload `test -r` checks is the same file the bundle writer copies
-    into `bundle/policies/`.
+    Delegates to policy_guest_path for the smoke workload (whose
+    lua-lsm-tools/examples directory and hello.lua default are the
+    historical resolution this helper encoded). Kept as a named wrapper
+    because its semantics -- policy name in, guest path out -- read better
+    at the smoke/unixbench call sites than the workload-name-aware helper.
     """
-    name = profile_policy or DEFAULT_SMOKE_POLICY_FILE
-    if "/" in name:
-        return name  # caller passed an absolute path through the share
-    filename = name if name.endswith(".lua") else f"{name}.lua"
-    return f"{GUEST_HOST_SHARE}/{LUA_LSM_TOOLS_EXAMPLES}/{filename}"
+    return policy_guest_path("smoke", profile_policy)
 
 
 def _policy_short_name(profile_policy: str | None) -> str:
@@ -416,15 +488,68 @@ def bench_short(target: ssh.SshTarget, ctx: CellContext) -> WorkloadResult:
     return out
 
 
-REGISTRY = {
-    "functional": functional,
-    "smoke": smoke,
-    "bench": bench,
-    "bench-short": bench_short,
-    "unixbench": unixbench,
-    "verify-cleanup": verify_cleanup,
-    "lkdtm": lkdtm,
-}
+# The single source of truth for workload registration. Everything the
+# harness needs beyond the callable itself -- guest fixture requirements,
+# policy resolution, share-dir requirements, the CLI's --workload choices --
+# derives from this table. Adding a workload means adding one entry here
+# (plus a config that selects it).
+SPECS.update({
+    "functional": WorkloadSpec(
+        name="functional",
+        fn=functional,
+        guest_fixtures=(
+            f"{GUEST_HOST_SHARE}/{LUA_LSM_TESTSUITE_FIXTURES}/guest/functional_policy.sh",
+        ),
+        policy_guest_dir=f"{LUA_LSM_TESTSUITE_FIXTURES}/policies",
+        default_policy="smoke.lua",
+        self_contained=True,
+    ),
+    "smoke": WorkloadSpec(
+        name="smoke",
+        fn=smoke,
+        guest_fixtures=(
+            f"{GUEST_HOST_SHARE}/{LUA_LSM_TOOLS_EXAMPLES}/hello.lua",
+        ),
+    ),
+    "bench": WorkloadSpec(
+        name="bench",
+        fn=bench,
+        guest_fixtures=(
+            f"{GUEST_HOST_SHARE}/{LUA_LSM_TOOLS_TOOLS}/bench.lua",
+        ),
+    ),
+    "bench-short": WorkloadSpec(
+        name="bench-short",
+        fn=bench_short,
+        guest_fixtures=(
+            f"{GUEST_HOST_SHARE}/{LUA_LSM_TOOLS_TOOLS}/bench.lua",
+        ),
+    ),
+    "unixbench": WorkloadSpec(
+        name="unixbench",
+        fn=unixbench,
+        guest_fixtures=(
+            f"{GUEST_HOST_SHARE}/{LUA_LSM_TOOLS_TOOLS}/lua_lsm_unixbench.sh",
+        ),
+    ),
+    "verify-cleanup": WorkloadSpec(
+        name="verify-cleanup",
+        fn=verify_cleanup,
+        guest_fixtures=(
+            f"{GUEST_HOST_SHARE}/{LUA_LSM_TOOLS_TOOLS}/verify_module_cleanup.sh",
+        ),
+    ),
+    "lkdtm": WorkloadSpec(
+        name="lkdtm",
+        fn=lkdtm,
+        # Uses /sys/kernel/debug/provoke-crash; checked at workload time.
+        guest_fixtures=(),
+    ),
+})
+
+# The callable registry (CLI --workload choices, by_name lookups) derives
+# from SPECS so the two can never drift apart.
+REGISTRY = {name: spec.fn for name, spec in SPECS.items()}
 
 
 def by_name(name: str):

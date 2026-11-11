@@ -15,19 +15,27 @@ from __future__ import annotations
 import datetime as _dt
 import hashlib
 import json
-import os
 import shlex
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Mapping
+from typing import Any, Mapping
 
 from . import (
     bundle, classifier, classifier_patterns, lkdtm_cell, perf_snapshot,
-    preflight, qemu, run_registry, schemas, signature, ssh,
+    preflight, qemu, run_registry, schemas, signature, ssh, workloads,
 )
+from .celltypes import CellContext, WorkloadFn, WorkloadResult
 from .cmdline import compose_env
 from .hostenv import HostEnv, cell_kvm_check, detect
+
+__all__ = [
+    "CellContext",
+    "CellInputs",
+    "WorkloadFn",
+    "WorkloadResult",
+    "run_cell",
+]
 
 # Remote paths in the guest where the kernel exposes lua-lsm telemetry.
 GUEST_STATS = "/sys/kernel/security/lua/stats"
@@ -35,34 +43,6 @@ GUEST_LSM_FUNCS = "/sys/kernel/security/lua/lsm_funcs"
 GUEST_DMESG_CMD = "dmesg --kernel --color=never --decode"
 GUEST_JOURNAL_CMD = "journalctl --no-pager -k -o short-precise || true"
 GUEST_HOST_SHARE = "/mnt/host"
-
-
-@dataclass
-class WorkloadResult:
-    name: str
-    returncode: int = 0
-    notes: str = ""
-
-
-@dataclass
-class CellContext:
-    cell_id: str
-    artifact_dir: Path
-    target: ssh.SshTarget
-    profile: Mapping[str, Any]
-    commands: list[str] = field(default_factory=list)
-
-    def record_command(self, cmd: str) -> None:
-        """Append a guest-side command to the cell's replay log.
-
-        Workloads call this for every shell command they push through SSH so
-        the bundle's commands.sh can replay the cell without parsing the
-        cell's per-workload log files.
-        """
-        self.commands.append(cmd)
-
-
-WorkloadFn = Callable[[ssh.SshTarget, CellContext], WorkloadResult]
 
 
 @dataclass
@@ -180,26 +160,9 @@ def _fetch_perf_texts(target: ssh.SshTarget) -> tuple[str | None, str | None]:
     return stats_text, funcs_text
 
 
-# Map workload names -> guest paths whose presence the cell runner verifies
-# before invoking the workload. Empty list means "no fixture required".
-_WORKLOAD_FIXTURES: dict[str, tuple[str, ...]] = {
-    "functional": (
-        "/mnt/host/lua-lsm-testsuite/fixtures/guest/functional_policy.sh",
-    ),
-    "smoke": (
-        "/mnt/host/lua-lsm-tools/examples/hello.lua",
-    ),
-    "bench": (
-        "/mnt/host/lua-lsm-tools/tools/bench.lua",
-    ),
-    "unixbench": (
-        "/mnt/host/lua-lsm-tools/tools/lua_lsm_unixbench.sh",
-    ),
-    "verify-cleanup": (
-        "/mnt/host/lua-lsm-tools/tools/verify_module_cleanup.sh",
-    ),
-    "lkdtm": (),  # uses /sys/kernel/debug/provoke-crash; checked at workload time.
-}
+# Guest fixtures whose presence the cell runner verifies before invoking a
+# workload live in workloads.SPECS (the workload registration table), next
+# to the workload function itself.
 
 
 def _check_workload_fixture(target: ssh.SshTarget, workload_name: str,
@@ -209,7 +172,8 @@ def _check_workload_fixture(target: ssh.SshTarget, workload_name: str,
     Returns a SKIP payload when a fixture is missing, None when all are
     present (or the workload has no fixture requirements).
     """
-    paths = list(_WORKLOAD_FIXTURES.get(workload_name, ()))
+    spec = workloads.SPECS.get(workload_name)
+    paths = list(spec.guest_fixtures) if spec is not None else []
     if workload_name == "smoke" and policy_path:
         # Smoke registers a specific policy file; require its presence
         # explicitly so a typo'd --policy fails fast as fixture-missing.
@@ -397,9 +361,8 @@ def run_cell(inputs: CellInputs, host: HostEnv | None = None) -> dict[str, Any]:
         # doesn't masquerade as a real workload failure.
         policy_guest_path: str | None = None
         if profile.get("policy"):
-            policy_guest_path = f"{GUEST_HOST_SHARE}/lua-lsm-tools/examples/{profile['policy']}"
-            if not str(profile["policy"]).endswith(".lua"):
-                policy_guest_path += ".lua"
+            policy_guest_path = workloads.policy_guest_path(
+                inputs.workload_name, str(profile["policy"]))
         fixture_skip = _check_workload_fixture(
             inputs.ssh_target, inputs.workload_name, policy_path=policy_guest_path,
         )
