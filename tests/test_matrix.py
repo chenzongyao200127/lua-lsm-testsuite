@@ -1,9 +1,15 @@
 import json
+import signal
+import subprocess
+import threading
+import time
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import MagicMock, patch
 
-from harness import matrix
+from harness import __main__ as cli
+from harness import cell_runner, hostenv, matrix, qemu, run_registry, schemas, ssh
 
 
 class ExpandTests(unittest.TestCase):
@@ -180,3 +186,352 @@ class ShareDirTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# ---------------------------------------------------------------------------
+# Moved verbatim from tests/test_round2.py (round-2 dissolution).
+# ---------------------------------------------------------------------------
+
+
+def _fake_handle(pid: int = 4242) -> qemu.QemuHandle:
+    proc = MagicMock()
+    proc.pid = pid
+    proc.poll.return_value = 0
+    proc.returncode = 0
+    return qemu.QemuHandle(
+        proc=proc,
+        serial_log_path=Path("/tmp/serial.log"),
+        pgid=pid,
+        started_at=0.0,
+    )
+
+
+def _fake_ssh_ok(target, cmd, timeout_s=120.0):
+    return ssh.SshResult(returncode=0, stdout="ok\n", stderr="")
+
+
+class _PatchHostEnv:
+    def __enter__(self):
+        self._patch = patch.object(
+            hostenv,
+            "detect",
+            return_value=hostenv.HostEnv(system="Linux", release="6.10.0", has_kvm=True),
+        )
+        self._patch.start()
+        return self
+
+    def __exit__(self, *exc):
+        self._patch.stop()
+
+
+class SigintReapTests(unittest.TestCase):
+    def test_sigint_stops_registered_handle_within_grace(self):
+        # Mock the qemu.stop path with an instrumented spy so we can verify
+        # registry.stop_all called it during the SIGINT handler. Use a serial
+        # runner with two cells so we can SIGINT after the first one starts.
+        with TemporaryDirectory() as td:
+            tdp = Path(td)
+            registry = run_registry.RunRegistry()
+            handle = _fake_handle()
+            registry.register("cell-a", handle)
+
+            stopped_in_handler: list[bool] = []
+
+            def _slow_runner(cell, art, port):
+                # Simulate the harness landing in the workload when SIGINT arrives.
+                # We send SIGINT into our own process, which the matrix executor
+                # has armed with _on_sigint, then assert the registry reaped.
+                import os
+
+                os.kill(os.getpid(), signal.SIGINT)
+                time.sleep(0.05)
+                stopped_in_handler.append("cell-a" not in registry.active_cells())
+                art.mkdir(parents=True, exist_ok=True)
+                return schemas.empty_result(cell.cell_id)
+
+            plan = matrix.MatrixPlan(
+                name="m",
+                cells=[
+                    matrix.CellSpec(
+                        cell_id="cell-a", profile={"workload": "smoke"}, workload="smoke"
+                    ),
+                ],
+            )
+            opts = matrix.ExecutorOpts(
+                parallel=1,
+                runs_root=tdp / "runs",
+                matrix_path=None,
+                port_base=20000,
+                registry=registry,
+            )
+            with patch.object(qemu, "stop", return_value=0) as stop_mock:
+                matrix.run_matrix(plan, opts, _slow_runner)
+            stop_mock.assert_called()
+            self.assertTrue(
+                stopped_in_handler and stopped_in_handler[0],
+                "registry.stop_all should have removed cell-a",
+            )
+
+
+class MatrixKconfigValidationTests(unittest.TestCase):
+    def _write_matrix(self, td: Path, doc_text: str) -> Path:
+        cfg = td / "matrix.json"
+        cfg.write_text(doc_text)
+        return cfg
+
+    def test_matrix_with_invalid_profile_in_axis_fails_before_runs_dir(self):
+        with TemporaryDirectory() as td:
+            tdp = Path(td)
+            cfg = self._write_matrix(
+                tdp,
+                json.dumps(
+                    {
+                        "name": "m",
+                        "defaults": {"workload": "smoke", "kind": "bughunt"},
+                        "axes": {"kconfig_profile": ["standard", "bogus"]},
+                    }
+                ),
+            )
+            args = [
+                "matrix",
+                "--config",
+                str(cfg),
+                "--runs-root",
+                str(tdp / "runs"),
+                "--ssh-key",
+                "/dev/null",
+                "--launcher",
+                "/nonexistent/run.sh",
+            ]
+            with _PatchHostEnv():
+                rc = cli.main(args)
+            self.assertEqual(
+                rc, cli.KSFT_FAIL, "matrix with bogus kconfig profile must fail at planning"
+            )
+            self.assertFalse(
+                (tdp / "runs").exists(), "runs dir must not be created when a profile is invalid"
+            )
+
+    def test_build_kernel_invoked_once_per_distinct_profile(self):
+        with TemporaryDirectory() as td:
+            tdp = Path(td)
+            # Two cells, two distinct profiles: helper must be called exactly
+            # twice with `--kernel <tree> --profile <X>` matching the real
+            # enable-debug-kconfig.sh contract (it requires --kernel <dir>).
+            cfg = self._write_matrix(
+                tdp,
+                json.dumps(
+                    {
+                        "name": "m",
+                        "defaults": {"workload": "smoke", "kind": "bughunt"},
+                        "axes": {"kconfig_profile": ["standard", "full"]},
+                    }
+                ),
+            )
+            debug_kernel = tdp / "tools"
+            debug_kernel.mkdir()
+            helper = debug_kernel / "enable-debug-kconfig.sh"
+            helper.write_text("#!/bin/sh\nexit 0\n")
+            helper.chmod(0o755)
+            kernel_tree = tdp / "linux"
+            kernel_tree.mkdir()
+
+            args = [
+                "matrix",
+                "--config",
+                str(cfg),
+                "--runs-root",
+                str(tdp / "runs"),
+                "--ssh-key",
+                "/dev/null",
+                "--launcher",
+                "/nonexistent/run.sh",
+                "--debug-kernel",
+                str(debug_kernel),
+                "--kernel-tree",
+                str(kernel_tree),
+                "--build-kernel",
+                "--parallel",
+                "1",
+                # Workload mocks so we never actually try to boot.
+            ]
+
+            run_calls: list[list[str]] = []
+
+            def _fake_subprocess_run(cmd, *a, **kw):
+                run_calls.append(list(cmd))
+                return subprocess.CompletedProcess(cmd, 0)
+
+            with (
+                _PatchHostEnv(),
+                patch.object(cli.subprocess, "run", side_effect=_fake_subprocess_run),
+                patch.object(qemu, "spawn", return_value=_fake_handle()),
+                patch.object(qemu, "stop", return_value=0),
+                patch.object(ssh, "wait_for_ssh", return_value=True),
+                patch.object(ssh, "run", side_effect=_fake_ssh_ok),
+                patch(
+                    "harness.workloads.by_name",
+                    return_value=lambda t, c: cell_runner.WorkloadResult(name="smoke"),
+                ),
+            ):
+                cli.main(args)
+
+            helper_calls = [c for c in run_calls if str(c[0]).endswith("enable-debug-kconfig.sh")]
+            self.assertEqual(
+                len(helper_calls),
+                2,
+                f"helper should be invoked once per distinct profile, got {helper_calls!r}",
+            )
+            # Every helper invocation MUST carry --kernel <tree> AND --profile <X>
+            for call in helper_calls:
+                self.assertIn("--kernel", call, f"helper call must include --kernel: {call!r}")
+                kernel_idx = call.index("--kernel")
+                self.assertEqual(
+                    call[kernel_idx + 1],
+                    str(kernel_tree),
+                    f"--kernel argument should be {kernel_tree}: {call!r}",
+                )
+                self.assertIn("--profile", call, f"helper call must include --profile: {call!r}")
+            seen_profiles = sorted(c[c.index("--profile") + 1] for c in helper_calls)
+            self.assertEqual(seen_profiles, ["full", "standard"])
+
+    def test_build_kernel_invoked_once_when_single_distinct_profile(self):
+        # When the matrix repeats the same profile across many cells, the
+        # helper must still run only once -- and still carry --kernel.
+        with TemporaryDirectory() as td:
+            tdp = Path(td)
+            cfg = self._write_matrix(
+                tdp,
+                json.dumps(
+                    {
+                        "name": "m",
+                        "defaults": {
+                            "workload": "smoke",
+                            "kind": "bughunt",
+                            "kconfig_profile": "standard",
+                        },
+                        "axes": {"lvm_pool_max": [4, 8, 16]},
+                    }
+                ),
+            )
+            debug_kernel = tdp / "tools"
+            debug_kernel.mkdir()
+            helper = debug_kernel / "enable-debug-kconfig.sh"
+            helper.write_text("#!/bin/sh\nexit 0\n")
+            helper.chmod(0o755)
+            kernel_tree = tdp / "linux"
+            kernel_tree.mkdir()
+            args = [
+                "matrix",
+                "--config",
+                str(cfg),
+                "--runs-root",
+                str(tdp / "runs"),
+                "--ssh-key",
+                "/dev/null",
+                "--launcher",
+                "/nonexistent/run.sh",
+                "--debug-kernel",
+                str(debug_kernel),
+                "--kernel-tree",
+                str(kernel_tree),
+                "--build-kernel",
+            ]
+            run_calls: list[list[str]] = []
+
+            def _fake_subprocess_run(cmd, *a, **kw):
+                run_calls.append(list(cmd))
+                return subprocess.CompletedProcess(cmd, 0)
+
+            with (
+                _PatchHostEnv(),
+                patch.object(cli.subprocess, "run", side_effect=_fake_subprocess_run),
+                patch.object(qemu, "spawn", return_value=_fake_handle()),
+                patch.object(qemu, "stop", return_value=0),
+                patch.object(ssh, "wait_for_ssh", return_value=True),
+                patch.object(ssh, "run", side_effect=_fake_ssh_ok),
+                patch(
+                    "harness.workloads.by_name",
+                    return_value=lambda t, c: cell_runner.WorkloadResult(name="smoke"),
+                ),
+            ):
+                cli.main(args)
+
+            helper_calls = [c for c in run_calls if str(c[0]).endswith("enable-debug-kconfig.sh")]
+            self.assertEqual(
+                len(helper_calls),
+                1,
+                f"helper should run exactly once for one distinct profile, got {helper_calls!r}",
+            )
+            call = helper_calls[0]
+            self.assertIn("--kernel", call)
+            self.assertEqual(call[call.index("--kernel") + 1], str(kernel_tree))
+            self.assertEqual(call[call.index("--profile") + 1], "standard")
+
+
+class MatrixSigintCancelTests(unittest.TestCase):
+    def test_sigint_cancels_queued_cells_and_runs_complete_fast(self):
+        import os
+
+        with TemporaryDirectory() as td:
+            tdp = Path(td)
+            cells = [
+                matrix.CellSpec(cell_id=f"c{i}", profile={"kind": "bughunt"}, workload="smoke")
+                for i in range(8)
+            ]
+            plan = matrix.MatrixPlan(name="sigint", cells=cells)
+            # workers=2 forces the cf.ThreadPoolExecutor branch where futures
+            # exist; workers=1 takes a serial path and would not exercise the
+            # cancel-pending-futures fix.
+            opts = matrix.ExecutorOpts(parallel=2, runs_root=tdp / "runs")
+
+            workers_in = threading.Semaphore(0)
+            release_blocker = threading.Event()
+
+            def _runner(cell, art, port):
+                # Block both workers until SIGINT lands; c2..c7 stay queued
+                # in the threadpool and are cancellation targets.
+                workers_in.release()
+                release_blocker.wait(timeout=10.0)
+                r = schemas.empty_result(cell.cell_id)
+                r["verdict"] = "pass"
+                r["finished_at"] = "2026-05-27T00:00:00+00:00"
+                return r
+
+            def _fire_sigint():
+                # Wait until both workers are blocked inside _runner so the
+                # remaining cells are queued (not in flight).
+                workers_in.acquire(timeout=10.0)
+                workers_in.acquire(timeout=10.0)
+                os.kill(os.getpid(), signal.SIGINT)
+                # Give the handler a moment to cancel queued futures, then
+                # release the held workers so they can return their `pass`
+                # results and the executor can drain.
+                time.sleep(0.1)
+                release_blocker.set()
+
+            t = threading.Thread(target=_fire_sigint, daemon=True)
+            t.start()
+            try:
+                result = matrix.run_matrix(plan, opts, _runner)
+            finally:
+                release_blocker.set()
+                t.join(timeout=5.0)
+
+            verdicts = {c["cell_id"]: c["verdict"] for c in result["cells"]}
+            # The two cells that occupied the workers run to completion.
+            passes = [cid for cid, v in verdicts.items() if v == "pass"]
+            aborts = [cid for cid, v in verdicts.items() if v == "aborted"]
+            self.assertEqual(len(passes), 2, f"exactly two workers were in flight, got {verdicts}")
+            self.assertEqual(
+                len(aborts), 6, f"the six queued cells must abort after SIGINT, got {verdicts}"
+            )
+            # Aborted cells still get a result.json on disk so a triage script
+            # can see the full plan.
+            runs_subdirs = list((tdp / "runs").iterdir())
+            self.assertEqual(len(runs_subdirs), 1, "expected exactly one timestamped runs subdir")
+            for cid in aborts:
+                self.assertTrue(
+                    (runs_subdirs[0] / cid / "result.json").exists(),
+                    f"missing result.json for aborted cell {cid}",
+                )

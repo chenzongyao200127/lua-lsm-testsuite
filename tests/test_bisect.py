@@ -1,6 +1,12 @@
+import json
 import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
+from unittest.mock import MagicMock, patch
 
-from harness import bisect
+from harness import __main__ as cli
+from harness import bisect, cell_runner, hostenv, qemu, ssh
+from harness import bisect as bisect_mod
 
 
 class BisectTests(unittest.TestCase):
@@ -61,3 +67,338 @@ class BisectTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# ---------------------------------------------------------------------------
+# Moved verbatim from tests/test_round2.py (round-2 dissolution).
+# ---------------------------------------------------------------------------
+
+
+def _fake_handle(pid: int = 4242) -> qemu.QemuHandle:
+    proc = MagicMock()
+    proc.pid = pid
+    proc.poll.return_value = 0
+    proc.returncode = 0
+    return qemu.QemuHandle(
+        proc=proc,
+        serial_log_path=Path("/tmp/serial.log"),
+        pgid=pid,
+        started_at=0.0,
+    )
+
+
+def _fake_ssh_ok(target, cmd, timeout_s=120.0):
+    return ssh.SshResult(returncode=0, stdout="ok\n", stderr="")
+
+
+class _PatchHostEnv:
+    def __enter__(self):
+        self._patch = patch.object(
+            hostenv,
+            "detect",
+            return_value=hostenv.HostEnv(system="Linux", release="6.10.0", has_kvm=True),
+        )
+        self._patch.start()
+        return self
+
+    def __exit__(self, *exc):
+        self._patch.stop()
+
+
+class BisectRunCellModeTests(unittest.TestCase):
+    def _write_cell(self, tdp: Path, profile: dict) -> Path:
+        p = tdp / "cell.json"
+        p.write_text(json.dumps(profile))
+        return p
+
+    def _common_args(self, tdp: Path, cell_path: Path, extra: list[str] | None = None) -> list[str]:
+        args = [
+            "bisect-run",
+            "--cell",
+            str(cell_path),
+            "--ssh-key",
+            "/dev/null",
+            "--launcher",
+            "/nonexistent/run.sh",
+            "--runs-root",
+            str(tdp / "runs"),
+            "--port-base",
+            "23000",
+        ]
+        if extra:
+            args.extend(extra)
+        return args
+
+    def test_clean_cell_returns_ksft_pass(self):
+        with TemporaryDirectory() as td:
+            tdp = Path(td)
+            cell = self._write_cell(
+                tdp,
+                {
+                    "workload": "smoke",
+                    "kind": "bughunt",
+                },
+            )
+
+            def _stub_run_cell(inputs, host=None):
+                inputs.artifact_dir.mkdir(parents=True, exist_ok=True)
+                result = {
+                    "schema_version": 1,
+                    "cell_id": inputs.cell_id,
+                    "verdict": "pass",
+                }
+                (inputs.artifact_dir / "result.json").write_text(json.dumps(result))
+                return result
+
+            with _PatchHostEnv(), patch.object(cell_runner, "run_cell", side_effect=_stub_run_cell):
+                rc = cli.main(self._common_args(tdp, cell))
+            self.assertEqual(rc, bisect_mod.KSFT_PASS)
+
+    def test_classifier_hit_returns_ksft_fail(self):
+        with TemporaryDirectory() as td:
+            tdp = Path(td)
+            cell = self._write_cell(
+                tdp,
+                {
+                    "workload": "smoke",
+                    "kind": "bughunt",
+                },
+            )
+
+            def _stub_run_cell(inputs, host=None):
+                inputs.artifact_dir.mkdir(parents=True, exist_ok=True)
+                result = {
+                    "schema_version": 1,
+                    "cell_id": inputs.cell_id,
+                    "verdict": "kernel-bug",
+                }
+                (inputs.artifact_dir / "result.json").write_text(json.dumps(result))
+                return result
+
+            with _PatchHostEnv(), patch.object(cell_runner, "run_cell", side_effect=_stub_run_cell):
+                rc = cli.main(self._common_args(tdp, cell))
+            self.assertEqual(rc, bisect_mod.KSFT_FAIL)
+
+    def test_build_helper_failure_returns_ksft_skip(self):
+        # When --build-kernel is set and the helper exits non-zero, the
+        # commit cannot be tested. Bisect must skip (125), not fail (1).
+        with TemporaryDirectory() as td:
+            tdp = Path(td)
+            cell = self._write_cell(
+                tdp,
+                {
+                    "workload": "smoke",
+                    "kind": "bughunt",
+                    "kconfig_profile": "standard",
+                },
+            )
+            debug_kernel = tdp / "tools"
+            debug_kernel.mkdir()
+            helper = debug_kernel / "enable-debug-kconfig.sh"
+            helper.write_text("#!/bin/sh\nexit 1\n")
+            helper.chmod(0o755)
+            kernel_tree = tdp / "linux"
+            kernel_tree.mkdir()
+
+            args = self._common_args(
+                tdp,
+                cell,
+                extra=[
+                    "--debug-kernel",
+                    str(debug_kernel),
+                    "--kernel-tree",
+                    str(kernel_tree),
+                    "--build-kernel",
+                ],
+            )
+            with _PatchHostEnv():
+                rc = cli.main(args)
+            self.assertEqual(
+                rc, bisect_mod.KSFT_SKIP, "build-helper failure must be bisect-skip (125), not fail"
+            )
+
+    def test_image_not_warm_verdict_returns_ksft_skip(self):
+        with TemporaryDirectory() as td:
+            tdp = Path(td)
+            cell = self._write_cell(
+                tdp,
+                {
+                    "workload": "bench",
+                    "kind": "perf",
+                },
+            )
+
+            def _stub_run_cell(inputs, host=None):
+                inputs.artifact_dir.mkdir(parents=True, exist_ok=True)
+                result = {
+                    "schema_version": 1,
+                    "cell_id": inputs.cell_id,
+                    "verdict": "skip:image-not-warm",
+                }
+                (inputs.artifact_dir / "result.json").write_text(json.dumps(result))
+                return result
+
+            with _PatchHostEnv(), patch.object(cell_runner, "run_cell", side_effect=_stub_run_cell):
+                rc = cli.main(self._common_args(tdp, cell))
+            self.assertEqual(rc, bisect_mod.KSFT_SKIP)
+
+    def test_build_fail_verdict_returns_ksft_skip(self):
+        # build-fail is FAIL_VERDICTS for TAP but UNTESTABLE for bisect.
+        with TemporaryDirectory() as td:
+            tdp = Path(td)
+            cell = self._write_cell(
+                tdp,
+                {
+                    "workload": "smoke",
+                    "kind": "bughunt",
+                },
+            )
+
+            def _stub_run_cell(inputs, host=None):
+                inputs.artifact_dir.mkdir(parents=True, exist_ok=True)
+                result = {
+                    "schema_version": 1,
+                    "cell_id": inputs.cell_id,
+                    "verdict": "build-fail",
+                }
+                (inputs.artifact_dir / "result.json").write_text(json.dumps(result))
+                return result
+
+            with _PatchHostEnv(), patch.object(cell_runner, "run_cell", side_effect=_stub_run_cell):
+                rc = cli.main(self._common_args(tdp, cell))
+            self.assertEqual(rc, bisect_mod.KSFT_SKIP)
+
+    def test_bundle_write_failure_returns_ksft_abort(self):
+        # When the runner finished but bundle emission threw, result["bundle_error"]
+        # is set. Bisect must abort (128) so the bisect halts rather than blaming
+        # the commit on a harness-side packaging failure.
+        with TemporaryDirectory() as td:
+            tdp = Path(td)
+            cell = self._write_cell(
+                tdp,
+                {
+                    "workload": "smoke",
+                    "kind": "bughunt",
+                },
+            )
+
+            def _stub_run_cell(inputs, host=None):
+                inputs.artifact_dir.mkdir(parents=True, exist_ok=True)
+                # The kernel produced a real hit (so the bundle attempt fired)
+                # but bundle packaging blew up.
+                result = {
+                    "schema_version": 1,
+                    "cell_id": inputs.cell_id,
+                    "verdict": "kernel-bug",
+                    "bundle_error": "OSError: disk full",
+                }
+                (inputs.artifact_dir / "result.json").write_text(json.dumps(result))
+                return result
+
+            with _PatchHostEnv(), patch.object(cell_runner, "run_cell", side_effect=_stub_run_cell):
+                rc = cli.main(self._common_args(tdp, cell))
+            self.assertEqual(rc, bisect_mod.KSFT_ABORT, "bundle_error must abort bisect (128)")
+
+    def test_run_cell_raises_returns_ksft_abort(self):
+        with TemporaryDirectory() as td:
+            tdp = Path(td)
+            cell = self._write_cell(
+                tdp,
+                {
+                    "workload": "smoke",
+                    "kind": "bughunt",
+                },
+            )
+
+            def _stub_run_cell(inputs, host=None):
+                raise RuntimeError("harness internal blew up")
+
+            with _PatchHostEnv(), patch.object(cell_runner, "run_cell", side_effect=_stub_run_cell):
+                rc = cli.main(self._common_args(tdp, cell))
+            self.assertEqual(rc, bisect_mod.KSFT_ABORT)
+
+    def test_cell_and_config_are_mutually_exclusive(self):
+        with TemporaryDirectory() as td:
+            tdp = Path(td)
+            cell = self._write_cell(tdp, {"workload": "smoke"})
+            mat = tdp / "m.json"
+            mat.write_text(json.dumps({"name": "m", "defaults": {"workload": "smoke"}}))
+            args = [
+                "bisect-run",
+                "--cell",
+                str(cell),
+                "--config",
+                str(mat),
+                "--ssh-key",
+                "/dev/null",
+                "--launcher",
+                "/nonexistent/run.sh",
+                "--runs-root",
+                str(tdp / "runs"),
+            ]
+            with _PatchHostEnv(), self.assertRaises(SystemExit) as cm:
+                cli.main(args)
+            self.assertNotEqual(cm.exception.code, 0, "argparse must reject --cell with --config")
+
+
+class BisectExitCodeMappingTests(unittest.TestCase):
+    """Pure mapping tests over bisect.exit_code_from_cell_result()."""
+
+    def test_pass(self):
+        self.assertEqual(
+            bisect_mod.exit_code_from_cell_result({"verdict": "pass"}), bisect_mod.KSFT_PASS
+        )
+
+    def test_kernel_bug_is_bad(self):
+        self.assertEqual(
+            bisect_mod.exit_code_from_cell_result({"verdict": "kernel-bug"}), bisect_mod.KSFT_FAIL
+        )
+
+    def test_workload_fail_is_bad(self):
+        self.assertEqual(
+            bisect_mod.exit_code_from_cell_result({"verdict": "workload-fail"}),
+            bisect_mod.KSFT_FAIL,
+        )
+
+    def test_build_fail_is_untestable(self):
+        self.assertEqual(
+            bisect_mod.exit_code_from_cell_result({"verdict": "build-fail"}), bisect_mod.KSFT_SKIP
+        )
+
+    def test_boot_timeout_is_untestable(self):
+        self.assertEqual(
+            bisect_mod.exit_code_from_cell_result({"verdict": "boot-timeout"}), bisect_mod.KSFT_SKIP
+        )
+
+    def test_all_skip_verdicts_are_untestable(self):
+        for v in (
+            "skip:no-kvm",
+            "skip:stats-unavailable",
+            "skip:image-not-warm",
+            "skip:no-lkdtm",
+            "skip:fixture-missing",
+        ):
+            self.assertEqual(
+                bisect_mod.exit_code_from_cell_result({"verdict": v}),
+                bisect_mod.KSFT_SKIP,
+                f"{v} should map to 125",
+            )
+
+    def test_harness_error_aborts(self):
+        for v in ("harness-error", "aborted", "no-dmesg"):
+            self.assertEqual(
+                bisect_mod.exit_code_from_cell_result({"verdict": v}),
+                bisect_mod.KSFT_ABORT,
+                f"{v} should abort",
+            )
+
+    def test_bundle_error_aborts_regardless_of_verdict(self):
+        self.assertEqual(
+            bisect_mod.exit_code_from_cell_result(
+                {"verdict": "pass", "bundle_error": "OSError"},
+            ),
+            bisect_mod.KSFT_ABORT,
+        )
+
+    def test_missing_verdict_aborts(self):
+        self.assertEqual(bisect_mod.exit_code_from_cell_result({}), bisect_mod.KSFT_ABORT)

@@ -97,3 +97,57 @@ class ParseTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# ---------------------------------------------------------------------------
+# Moved verbatim from tests/test_round2.py (round-2 dissolution).
+# ---------------------------------------------------------------------------
+def _required_counters_text() -> str:
+    from harness import schemas as _s
+
+    return "\n".join(f"{k} = {i}" for i, k in enumerate(_s.REQUIRED_COUNTER_KEYS)) + "\n"
+
+
+def _valid_funcs_text() -> str:
+    return (
+        "stats for lua-lsm (ns)\n"
+        "num name                         nlsm        "
+        "count           total    average      maxtime\n"
+        "----\n"
+        "  1 inode_permission             1           5               500      100         200\n"
+    )
+
+
+class PerfSnapshotValidationTests(unittest.TestCase):
+    def test_validate_snapshot_accepts_valid(self):
+        from harness import perf_snapshot as ps
+
+        snap = ps.Snapshot()
+        snap.counters = ps.parse_stats_text(_required_counters_text())
+        snap.lsm_funcs = ps.parse_lsm_funcs_text(_valid_funcs_text())
+        self.assertIsNone(ps.validate_snapshot(snap))
+
+    def test_validate_snapshot_rejects_missing_keys(self):
+        from harness import perf_snapshot as ps
+
+        snap = ps.Snapshot()
+        snap.counters = {"lvm.nalloc": 0}  # only one of the required keys
+        snap.lsm_funcs = ps.parse_lsm_funcs_text(_valid_funcs_text())
+        reason = ps.validate_snapshot(snap)
+        self.assertIsNotNone(reason)
+        self.assertIn("missing required counters", reason)
+
+    def test_validate_snapshot_rejects_empty_lsm_funcs(self):
+        from harness import perf_snapshot as ps
+
+        snap = ps.Snapshot()
+        snap.counters = ps.parse_stats_text(_required_counters_text())
+        snap.lsm_funcs = {}
+        reason = ps.validate_snapshot(snap)
+        self.assertIsNotNone(reason)
+        self.assertIn("lsm_funcs", reason)
+
+    def test_validate_snapshot_rejects_none(self):
+        from harness import perf_snapshot as ps
+
+        self.assertIsNotNone(ps.validate_snapshot(None))

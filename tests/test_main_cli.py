@@ -18,18 +18,18 @@ from unittest import mock
 from unittest.mock import MagicMock, patch
 
 from harness import __main__ as cli
-from harness import bisect, cell_runner, hostenv, qemu, ssh
+from harness import bisect, cell_runner, hostenv, qemu, schemas, ssh
 
 
-def _fake_handle() -> qemu.QemuHandle:
+def _fake_handle(pid: int = 4242) -> qemu.QemuHandle:
     proc = MagicMock()
-    proc.pid = 4242
+    proc.pid = pid
     proc.poll.return_value = 0
     proc.returncode = 0
     return qemu.QemuHandle(
         proc=proc,
         serial_log_path=Path("/tmp/serial.log"),
-        pgid=4242,
+        pgid=pid,
         started_at=0.0,
     )
 
@@ -477,3 +477,147 @@ class CliHostRefusalTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# ---------------------------------------------------------------------------
+# Moved verbatim from tests/test_round2.py (round-2 dissolution).
+# ---------------------------------------------------------------------------
+
+
+class CliDetachVmTests(unittest.TestCase):
+    def test_detach_vm_prints_pid_and_port_skips_workload_and_result_json(self):
+        with TemporaryDirectory() as td:
+            tdp = Path(td)
+            args = [
+                "run",
+                "--workload",
+                "smoke",
+                "--kind",
+                "bughunt",
+                "--no-kvm",
+                "--ssh-key",
+                "/dev/null",
+                "--launcher",
+                "/nonexistent/launcher.sh",
+                "--runs-root",
+                str(tdp / "runs"),
+                "--boot-timeout",
+                "1.0",
+                "--ssh-port",
+                "10099",
+                "--detach-vm",
+            ]
+            workload_called = MagicMock()
+            with (
+                _PatchHostEnv(),
+                patch.object(qemu, "spawn", return_value=_fake_handle(pid=7777)) as spawn_mock,
+                patch.object(qemu, "stop", return_value=0) as stop_mock,
+                patch.object(ssh, "wait_for_ssh", return_value=True),
+                patch.object(ssh, "run", side_effect=_fake_ssh_run),
+                patch("harness.workloads.by_name", return_value=workload_called),
+                patch("sys.stdout") as stdout_mock,
+            ):
+                rc = cli.main(args)
+
+            self.assertEqual(rc, cli.KSFT_PASS)
+            spawn_mock.assert_called_once()
+            stop_mock.assert_not_called()
+            workload_called.assert_not_called()
+
+            cell_dirs = list((tdp / "runs").glob("*"))
+            self.assertEqual(len(cell_dirs), 1)
+            cell_dir = cell_dirs[0]
+            self.assertTrue((cell_dir / "cell.json").exists())
+            self.assertTrue((cell_dir / "extra-cmdline.txt").exists())
+            self.assertTrue((cell_dir / "qemu-cmdline.txt").exists())
+            self.assertFalse(
+                (cell_dir / "result.json").exists(), "--detach-vm must not finalize result.json"
+            )
+
+            stdout_writes = "".join(
+                str(c.args[0]) if c.args else "" for c in stdout_mock.write.call_args_list
+            )
+            self.assertIn("pid=7777", stdout_writes)
+            self.assertIn("ssh_port=10099", stdout_writes)
+
+
+class CliInteractiveTests(unittest.TestCase):
+    def test_interactive_passes_interactive_true_to_spawn_and_writes_result(self):
+        with TemporaryDirectory() as td:
+            tdp = Path(td)
+            captured_kwargs = {}
+
+            def _spawn_capturing(launcher, env, serial_log_path, **kwargs):
+                captured_kwargs.update(kwargs)
+                serial_log_path.parent.mkdir(parents=True, exist_ok=True)
+                serial_log_path.write_text("[    0.000] Linux version 6.10\n")
+                return _fake_handle()
+
+            args = [
+                "run",
+                "--workload",
+                "smoke",
+                "--kind",
+                "bughunt",
+                "--no-kvm",
+                "--ssh-key",
+                "/dev/null",
+                "--launcher",
+                "/nonexistent/launcher.sh",
+                "--runs-root",
+                str(tdp / "runs"),
+                "--boot-timeout",
+                "1.0",
+                "--interactive",
+            ]
+            with (
+                _PatchHostEnv(),
+                patch.object(qemu, "spawn", side_effect=_spawn_capturing),
+                patch.object(qemu, "stop", return_value=0),
+                patch.object(ssh, "wait_for_ssh", return_value=True),
+                patch.object(ssh, "run", side_effect=_fake_ssh_run),
+                patch.object(ssh, "fetch_text", return_value=None),
+            ):
+                rc = cli.main(args)
+            self.assertEqual(rc, cli.KSFT_PASS)
+            self.assertEqual(captured_kwargs.get("interactive"), True)
+            cell_dirs = list((tdp / "runs").glob("*"))
+            self.assertEqual(len(cell_dirs), 1)
+            self.assertTrue(
+                (cell_dirs[0] / "result.json").exists(),
+                "--interactive must still write result.json at teardown",
+            )
+
+
+class KconfigValidationTests(unittest.TestCase):
+    def test_assert_kconfig_profile_accepts_standard_and_full(self):
+        schemas.assert_kconfig_profile("standard")
+        schemas.assert_kconfig_profile("full")
+        schemas.assert_kconfig_profile(None)
+
+    def test_assert_kconfig_profile_rejects_unknown(self):
+        with self.assertRaises(schemas.KconfigProfileError):
+            schemas.assert_kconfig_profile("debug")
+
+    def test_run_subcommand_refuses_bad_profile_before_artifact_dir(self):
+        with TemporaryDirectory() as td:
+            tdp = Path(td)
+            args = [
+                "run",
+                "--workload",
+                "smoke",
+                "--no-kvm",
+                "--ssh-key",
+                "/dev/null",
+                "--runs-root",
+                str(tdp / "runs"),
+                "--kconfig-profile",
+                "bogus",
+            ]
+            with _PatchHostEnv(), self.assertRaises(SystemExit):
+                # argparse rejects choices outside its allowed list.
+                cli.main(args)
+            self.assertFalse(
+                (tdp / "runs").exists(),
+                "no artifact dir should be created on invalid kconfig profile",
+            )
