@@ -183,6 +183,9 @@ def _fetch_perf_texts(target: ssh.SshTarget) -> tuple[str | None, str | None]:
 # Map workload names -> guest paths whose presence the cell runner verifies
 # before invoking the workload. Empty list means "no fixture required".
 _WORKLOAD_FIXTURES: dict[str, tuple[str, ...]] = {
+    "functional": (
+        "/mnt/host/lua-lsm-testsuite/fixtures/guest/functional_policy.sh",
+    ),
     "smoke": (
         "/mnt/host/lua-lsm-tools/examples/hello.lua",
     ),

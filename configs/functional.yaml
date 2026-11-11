@@ -1,0 +1,9 @@
+name: functional
+workload: functional
+defaults:
+  kvm_required: true
+  kind: bughunt
+  policy: smoke
+axes:
+  lvm_pool_max: [0, 32]
+exclude: []

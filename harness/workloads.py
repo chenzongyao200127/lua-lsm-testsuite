@@ -32,6 +32,8 @@ GUEST_HOST_SHARE = "/mnt/host"
 LUA_LSM_TOOLS_DIR = "lua-lsm-tools"
 LUA_LSM_TOOLS_TOOLS = f"{LUA_LSM_TOOLS_DIR}/tools"
 LUA_LSM_TOOLS_EXAMPLES = f"{LUA_LSM_TOOLS_DIR}/examples"
+LUA_LSM_TESTSUITE_DIR = "lua-lsm-testsuite"
+LUA_LSM_TESTSUITE_FIXTURES = f"{LUA_LSM_TESTSUITE_DIR}/fixtures"
 UNIXBENCH_DIR = "unixbench"
 
 # securityfs interfaces the kernel exposes for lua-lsm.
@@ -132,6 +134,21 @@ def smoke(target: ssh.SshTarget, ctx: CellContext) -> WorkloadResult:
     if out.returncode == 0 and r2.returncode != 0:
         out.returncode = r2.returncode
         out.notes = f"smoke unregister exited {r2.returncode}"
+    return out
+
+
+def functional(target: ssh.SshTarget, ctx: CellContext) -> WorkloadResult:
+    """Run the self-contained Lua-LSM policy API and dispatch assertions."""
+    out = WorkloadResult(name="functional")
+    script = (
+        f"{GUEST_HOST_SHARE}/{LUA_LSM_TESTSUITE_FIXTURES}/"
+        "guest/functional_policy.sh"
+    )
+    timeout = float(ctx.profile.get("workload_timeout_s", 120.0))
+
+    cmd = f"bash {shlex.quote(script)}"
+    result = ssh.run(target, cmd, timeout_s=timeout)
+    _record(out, ctx, "workload-functional.log", cmd, result)
     return out
 
 
@@ -400,6 +417,7 @@ def bench_short(target: ssh.SshTarget, ctx: CellContext) -> WorkloadResult:
 
 
 REGISTRY = {
+    "functional": functional,
     "smoke": smoke,
     "bench": bench,
     "bench-short": bench_short,

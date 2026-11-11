@@ -26,6 +26,9 @@ uv sync --dev
 # Smoke a single cell against an already-built kernel
 make smoke POLICY=hello
 
+# Run the self-contained policy API and dispatch assertions
+make functional KERNEL_IMG=/path/to/bzImage ROOTFS_IMG=/path/to/rootfs.img
+
 # Run the default 32-cell smoke matrix
 make matrix
 
@@ -123,6 +126,10 @@ lua-lsm-testsuite/
   tests/                unit tests for harness components
 ```
 
+See `docs/ARCHITECTURE.md` for the split between this repository and the
+kernel tree, plus the incremental cleanup plan. Performance gate philosophy is
+recorded in `docs/EBPF_GUARDRAILS.md`.
+
 ## Development
 
 ```sh
@@ -138,5 +145,4 @@ make clean
 
 ## Plan reference
 
-This implementation is driven by the converged plan at
-`kernel/linux/.humanize/plans/lua-lsm-out-of-tree-qemu-matrix-harness-20260525-110738.md`.
+Architecture and cleanup direction live in `docs/ARCHITECTURE.md`.

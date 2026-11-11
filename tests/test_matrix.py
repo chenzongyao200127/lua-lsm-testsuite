@@ -158,6 +158,16 @@ class ShareDirTests(unittest.TestCase):
             (tdp / "kernel" / "linux").mkdir(parents=True)
             matrix.assert_share_dir(tdp)  # no exception
 
+    def test_share_dir_requirement_is_workload_aware(self):
+        self.assertEqual(
+            matrix.required_share_entries(["functional"]),
+            ("lua-lsm-testsuite",),
+        )
+        self.assertEqual(
+            matrix.required_share_entries(["functional", "smoke"]),
+            matrix.REQUIRED_SHARE_ENTRIES,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

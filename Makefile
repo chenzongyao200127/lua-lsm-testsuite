@@ -13,12 +13,14 @@ POLICY ?= hello
 
 export KERNEL_TREE ROOTFS_IMG KERNEL_IMG DEBUG_KERNEL LUA_LSM_TOOLS WORKSPACE TOOLS_DIR
 
-.PHONY: help sync smoke matrix matrix-perf bisect-run image image-warm kernel-debug test selftest clean distclean
+.PHONY: help sync smoke functional matrix matrix-perf bisect-run image \
+	image-warm kernel-debug test selftest clean distclean
 
 help:
 	@echo "Targets:"
 	@echo "  sync                         install/update the uv-managed project environment"
 	@echo "  smoke POLICY=<name>          run a single smoke cell with the named policy"
+	@echo "  functional                    run the self-contained policy API matrix"
 	@echo "  matrix                       run the default 32-cell smoke matrix"
 	@echo "  matrix-perf                  run the UnixBench-anchored matrix (opt-in)"
 	@echo "  bisect-run CELL=<matrix>     run a matrix as a git bisect target with KSFT exit codes"
@@ -28,7 +30,7 @@ help:
 	@echo "  test                         run harness unit tests with $(PYTHON)"
 	@echo "  selftest                     run lightweight in-tree self-tests (classifier patterns, etc.)"
 	@echo "  clean                        remove generated artifacts and caches"
-	@echo "  distclean                    alias for clean"
+	@echo "  distclean                    remove generated artifacts and .venv"
 
 sync:
 	$(UV) sync --dev
@@ -62,15 +64,20 @@ kernel-debug:
 	$(DEBUG_KERNEL)/enable-debug-kconfig.sh --kernel $(KERNEL_TREE) --profile $(PROFILE)
 
 test:
-	$(UV) run pytest
+	$(PYTHON) -m pytest
 
 selftest:
 	$(PYTHON) -m harness.classifier_patterns --selftest
 	$(PYTHON) -m harness.signature --selftest
 
+functional:
+	$(PYTHON) -m harness matrix --config configs/functional.yaml --parallel $(PARALLEL) \
+		--kernel $(KERNEL_IMG) --rootfs $(ROOTFS_IMG) --share-dir $(WORKSPACE)
+
 clean:
 	rm -rf runs out __pycache__ harness/__pycache__ tests/__pycache__ \
 		.pytest_cache .mypy_cache .ruff_cache .hypothesis \
-		build dist .eggs *.egg-info htmlcov .coverage junit.xml .venv
+		build dist .eggs *.egg-info htmlcov .coverage junit.xml
 
 distclean: clean
+	rm -rf .venv

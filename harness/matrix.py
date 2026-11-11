@@ -154,9 +154,18 @@ class ShareDirError(ValueError):
 
 
 REQUIRED_SHARE_ENTRIES = ("lua-lsm-tools", "kernel/linux")
+SELF_CONTAINED_WORKLOADS = frozenset({"functional"})
 
 
-def assert_share_dir(share_dir: Path) -> None:
+def required_share_entries(workload_names: list[str]) -> tuple[str, ...]:
+    """Return the share entries needed by a set of workload names."""
+    if workload_names and all(name in SELF_CONTAINED_WORKLOADS for name in workload_names):
+        return ("lua-lsm-testsuite",)
+    return REQUIRED_SHARE_ENTRIES
+
+
+def assert_share_dir(share_dir: Path,
+                     required_entries: tuple[str, ...] | None = None) -> None:
     """Refuse a workspace that's missing the load-bearing trees.
 
     The matrix runner calls this once at planning time so a bad SHARE_DIR
@@ -165,12 +174,12 @@ def assert_share_dir(share_dir: Path) -> None:
     sd = Path(share_dir)
     if not sd.exists() or not sd.is_dir():
         raise ShareDirError(f"share_dir does not exist or is not a directory: {sd}")
-    missing = [name for name in REQUIRED_SHARE_ENTRIES if not (sd / name).exists()]
+    entries = REQUIRED_SHARE_ENTRIES if required_entries is None else required_entries
+    missing = [name for name in entries if not (sd / name).exists()]
     if missing:
         raise ShareDirError(
             f"share_dir {sd} is missing required entries: {missing}; "
-            f"expected a workspace with lua-lsm-tools/ and kernel/linux/ "
-            f"(typical layout: /Volumes/DevWork or /work)."
+            f"expected a workspace containing {entries}."
         )
 
 
@@ -230,7 +239,10 @@ def run_matrix(plan: MatrixPlan, opts: ExecutorOpts, cell_runner_fn) -> dict[str
     triagable.
     """
     if opts.share_dir is not None:
-        assert_share_dir(opts.share_dir)
+        assert_share_dir(
+            opts.share_dir,
+            required_share_entries([cell.workload for cell in plan.cells]),
+        )
 
     matrix = schemas.empty_matrix()
     matrix["started_at"] = _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds")

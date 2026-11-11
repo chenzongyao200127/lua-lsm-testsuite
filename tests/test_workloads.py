@@ -11,7 +11,8 @@ class WorkloadRegistryTests(unittest.TestCase):
     def test_registry_known_workloads(self):
         self.assertEqual(
             set(workloads.REGISTRY),
-            {"smoke", "bench", "bench-short", "unixbench", "verify-cleanup", "lkdtm"},
+            {"functional", "smoke", "bench", "bench-short", "unixbench",
+             "verify-cleanup", "lkdtm"},
         )
 
     def test_bench_short_is_bounded_alias_of_bench(self):
@@ -76,6 +77,27 @@ class WorkloadInvocationTests(unittest.TestCase):
             joined = "\n".join(ctx.commands)
             self.assertIn("/sys/kernel/security/lua/register", joined)
             self.assertIn("/sys/kernel/security/lua/unregister", joined)
+
+    def test_functional_uses_self_contained_fixture(self):
+        with TemporaryDirectory() as td:
+            art = Path(td)
+            ctx = self._ctx(art, profile={"workload_timeout_s": 45})
+            fake_result = ssh.SshResult(
+                returncode=0, stdout="ok 9 - policy unloads\n", stderr=""
+            )
+            with patch.object(ssh, "run", return_value=fake_result) as mock_run:
+                result = workloads.functional(ctx.target, ctx)
+            self.assertEqual(result.name, "functional")
+            self.assertEqual(result.returncode, 0)
+            self.assertEqual(mock_run.call_count, 1)
+            self.assertEqual(
+                ctx.commands[0],
+                "bash /mnt/host/lua-lsm-testsuite/fixtures/guest/functional_policy.sh",
+            )
+            self.assertIn(
+                "ok 9 - policy unloads",
+                (art / "workload-functional.log").read_text(),
+            )
 
     def test_smoke_short_circuits_when_present_check_fails(self):
         with TemporaryDirectory() as td:

@@ -52,6 +52,18 @@ class _PatchHostEnv:
         self._patch.stop()
 
 
+class PolicyPathTests(unittest.TestCase):
+    def test_functional_policy_resolves_to_repository_fixture(self):
+        with TemporaryDirectory() as td:
+            share_dir = Path(td)
+            paths = cli._resolve_policy_paths(share_dir, "smoke", "functional")
+            self.assertEqual(
+                paths,
+                (share_dir / "lua-lsm-testsuite" / "fixtures" / "policies"
+                 / "smoke.lua",),
+            )
+
+
 class CliRunTests(unittest.TestCase):
     def test_run_help_does_not_touch_host(self):
         with self.assertRaises(SystemExit) as cm:

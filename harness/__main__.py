@@ -17,7 +17,7 @@ Refusal at planning time:
     - Darwin host -> hostenv.assert_supported raises before any runs/ dir.
     - --detach-vm in matrix/bisect-run -> argparse rejects it (interactive
       mode is per-cell only).
-    - SHARE_DIR missing lua-lsm-tools/ or kernel/linux/ -> matrix.assert_share_dir.
+    - SHARE_DIR missing the entries required by the selected workloads.
 
 The CLI's exit code matters:
     run             0 on pass, 1 on any non-pass non-skip; KSFT 4 on skip.
@@ -76,7 +76,7 @@ def _build_parser() -> argparse.ArgumentParser:
     pr.add_argument("--workload", default="smoke",
                     choices=sorted(workloads.REGISTRY))
     pr.add_argument("--policy", default=None,
-                    help="policy file under lua-lsm-tools/examples (default: hello.lua)")
+                    help="policy file under the workload's fixture or tools directory")
     pr.add_argument("--kind", default="bughunt", choices=("perf", "bughunt"))
     pr.add_argument("--lsm", default=None,
                     help="lsm chain string passed to the kernel cmdline")
@@ -364,11 +364,16 @@ def _resolve_policy_paths(share_dir: Path | None, policy_name: str | None,
     if share_dir is None:
         return tuple()
     name = policy_name
-    if name is None and workload_name == "smoke":
+    if name is None and workload_name in ("smoke", "functional"):
         name = _DEFAULT_SMOKE_POLICY
     if not name:
         return tuple()
     filename = name if name.endswith(".lua") else f"{name}.lua"
+    if workload_name == "functional":
+        return (
+            Path(share_dir) / workloads.LUA_LSM_TESTSUITE_DIR
+            / "fixtures" / "policies" / filename,
+        )
     return (Path(share_dir) / "lua-lsm-tools" / "examples" / filename,)
 
 
@@ -423,7 +428,10 @@ def _cmd_run(args: argparse.Namespace) -> int:
 
     if args.share_dir is not None:
         try:
-            matrix.assert_share_dir(args.share_dir)
+            matrix.assert_share_dir(
+                args.share_dir,
+                matrix.required_share_entries([args.workload]),
+            )
         except matrix.ShareDirError as e:
             print(f"error: {e}", file=sys.stderr)
             return KSFT_FAIL
@@ -593,18 +601,20 @@ def _build_cell_runner_callback(args: argparse.Namespace, workspace_root: Path,
 
 def _cmd_matrix(args: argparse.Namespace) -> int:
     _enforce_supported_host()
-    if args.share_dir is not None:
-        try:
-            matrix.assert_share_dir(args.share_dir)
-        except matrix.ShareDirError as e:
-            print(f"error: {e}", file=sys.stderr)
-            return KSFT_FAIL
-
     # Expand and validate the matrix BEFORE creating runs/ or invoking the
     # kernel build helper: an invalid kconfig profile in any expanded cell
     # must fail before any artifact directory exists, and --build-kernel must
     # know every distinct profile so it runs the helper once per profile.
     plan = matrix.plan_from_file(Path(args.config))
+    if args.share_dir is not None:
+        try:
+            matrix.assert_share_dir(
+                args.share_dir,
+                matrix.required_share_entries([cell.workload for cell in plan.cells]),
+            )
+        except matrix.ShareDirError as e:
+            print(f"error: {e}", file=sys.stderr)
+            return KSFT_FAIL
     distinct_profiles, rc = _validate_matrix_kconfig_profiles(plan, args.kconfig_profile)
     if rc != 0:
         return rc
@@ -712,7 +722,10 @@ def _cmd_bisect_run_single_cell(args: argparse.Namespace) -> int:
 
     if args.share_dir is not None:
         try:
-            matrix.assert_share_dir(args.share_dir)
+            matrix.assert_share_dir(
+                args.share_dir,
+                matrix.required_share_entries([workload_name]),
+            )
         except matrix.ShareDirError as e:
             print(f"error: {e}", file=sys.stderr)
             return bisect.KSFT_ABORT
@@ -785,14 +798,16 @@ def _cmd_bisect_run(args: argparse.Namespace) -> int:
     if getattr(args, "cell", None) is not None:
         return _cmd_bisect_run_single_cell(args)
 
+    plan = matrix.plan_from_file(Path(args.config))
     if args.share_dir is not None:
         try:
-            matrix.assert_share_dir(args.share_dir)
+            matrix.assert_share_dir(
+                args.share_dir,
+                matrix.required_share_entries([cell.workload for cell in plan.cells]),
+            )
         except matrix.ShareDirError as e:
             print(f"error: {e}", file=sys.stderr)
             return bisect.KSFT_ABORT
-
-    plan = matrix.plan_from_file(Path(args.config))
     distinct_profiles, rc = _validate_matrix_kconfig_profiles(plan, args.kconfig_profile)
     if rc != 0:
         return bisect.KSFT_ABORT
