@@ -2,12 +2,7 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from harness.classifier import (
-    classify_files,
-    classify_text,
-    has_any_log,
-    verdict_for_hits,
-)
+from harness.classifier import classify_files, classify_text
 from harness.classifier_patterns import PATTERN_VERSION, PATTERNS, selftest
 
 
@@ -25,7 +20,6 @@ class ClassifierTests(unittest.TestCase):
         self.assertEqual(hits[0].pattern, "BUG: KASAN")
         self.assertEqual(hits[0].line, 2)
         self.assertIn("KASAN", hits[0].substring)
-        self.assertEqual(verdict_for_hits(hits), "kernel-bug")
 
     def test_clean_log_returns_pass(self):
         log = "\n".join(
@@ -35,9 +29,7 @@ class ClassifierTests(unittest.TestCase):
                 "[    2.0] login: ",
             ]
         )
-        hits = classify_text(log)
-        self.assertEqual(hits, [])
-        self.assertEqual(verdict_for_hits(hits), "pass")
+        self.assertEqual(classify_text(log), [])
 
     def test_anchored_negative_kasan_in_lua_message(self):
         # The substring "KASAN" appears in a benign LSM message. MUST NOT match.
@@ -64,7 +56,6 @@ class ClassifierTests(unittest.TestCase):
         hits = classify_text(log)
         labels = [h.pattern for h in hits]
         self.assertIn("WARNING: CPU:", labels)
-        self.assertEqual(verdict_for_hits(hits), "kernel-bug")
 
     def test_classify_files_handles_missing_paths(self):
         with TemporaryDirectory() as td:
@@ -74,15 +65,6 @@ class ClassifierTests(unittest.TestCase):
             hits = classify_files([missing, real])
             self.assertTrue(hits)
             self.assertEqual(hits[0].pattern, "BUG: KASAN")
-
-    def test_has_any_log(self):
-        with TemporaryDirectory() as td:
-            empty = Path(td) / "e.log"
-            empty.write_text("")
-            real = Path(td) / "r.log"
-            real.write_text("hi\n")
-            self.assertTrue(has_any_log([empty, real]))
-            self.assertFalse(has_any_log([empty]))
 
     def test_pattern_version_exposed(self):
         self.assertEqual(PATTERN_VERSION, 2)

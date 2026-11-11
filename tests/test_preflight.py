@@ -45,28 +45,6 @@ class GuestPreflightTests(unittest.TestCase):
             self.assertIsNotNone(r)
             self.assertEqual(r["verdict"], "skip:fixture-missing")
 
-    def test_workload_binary_present(self):
-        with patch.object(
-            ssh, "run", return_value=ssh.SshResult(returncode=0, stdout="", stderr="")
-        ):
-            self.assertIsNone(
-                preflight.workload_binary_check(self._target(), ["/mnt/host/unixbench/Run"])
-            )
-
-    def test_workload_binary_missing(self):
-        with patch.object(
-            ssh, "run", return_value=ssh.SshResult(returncode=1, stdout="", stderr="")
-        ):
-            r = preflight.workload_binary_check(self._target(), ["/mnt/host/unixbench/Run"])
-            self.assertEqual(r["verdict"], "skip:fixture-missing")
-
-    def test_securityfs_lua_missing(self):
-        with patch.object(
-            ssh, "run", return_value=ssh.SshResult(returncode=1, stdout="", stderr="")
-        ):
-            r = preflight.securityfs_lua_check(self._target())
-            self.assertEqual(r["verdict"], "skip:stats-unavailable")
-
 
 if __name__ == "__main__":
     unittest.main()

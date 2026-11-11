@@ -229,36 +229,37 @@ class ExecutorOpts:
     registry: run_registry.RunRegistry | None = None
 
 
-def run_matrix(plan: MatrixPlan, opts: ExecutorOpts, cell_runner_fn) -> dict[str, Any]:
-    """Execute every cell with bounded parallelism and write matrix.json.
+def _cell_artifact_dir(runs_dir: Path, cell: CellSpec) -> Path:
+    return runs_dir / cell.cell_id
 
-    `cell_runner_fn(cell: CellSpec, artifact_dir: Path, port: int) -> dict`
-    returns the per-cell result.json dict. The matrix executor is unaware of
-    how the cell runs (real QEMU, mocked subprocess, dry-run): it sees only
-    the result dict and aggregates totals.
 
-    A SIGINT during execution stops scheduling further cells and writes an
-    `aborted` verdict for any cell that hadn't reported a result by the time
-    the interrupt landed. matrix.json is still written so a partial run is
-    triagable.
+def _aborted_result(cell_id: str, reason: str) -> dict[str, Any]:
+    """Synthetic result.json for a cell that never got to run."""
+    result = schemas.empty_result(cell_id)
+    result["verdict"] = "aborted"
+    result["reason"] = reason
+    result["finished_at"] = _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds")
+    return result
+
+
+def _execute_cells(
+    plan: MatrixPlan,
+    opts: ExecutorOpts,
+    cell_runner_fn,
+    runs_dir: Path,
+) -> dict[str, dict[str, Any]]:
+    """Run every cell with bounded parallelism; own the SIGINT machinery.
+
+    Returns `finished`, the {cell_id: result} map the caller uses to build
+    matrix.json's cells section -- cells absent from it never reported a
+    result and are recorded as `aborted` by the caller.
+
+    A SIGINT during execution stops scheduling further cells and cancels any
+    queued future; the handler block below is the subtlest code in the repo
+    and is moved here VERBATIM from run_matrix (tests MatrixSigintCancel /
+    SigintReap pin its behavior). matrix.json is still written by the caller
+    so a partial run is triageable.
     """
-    if opts.share_dir is not None:
-        assert_share_dir(
-            opts.share_dir,
-            required_share_entries([cell.workload for cell in plan.cells]),
-        )
-
-    matrix = schemas.empty_matrix()
-    matrix["started_at"] = _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds")
-    matrix["config"] = {
-        "parallel": opts.parallel,
-        "matrix_path": str(opts.matrix_path) if opts.matrix_path else None,
-        "port_base": opts.port_base,
-        "share_dir": str(opts.share_dir) if opts.share_dir else None,
-    }
-    runs_dir = opts.runs_root / _utc_now_id()
-    runs_dir.mkdir(parents=True, exist_ok=True)
-
     ports = allocate_ports(len(plan.cells), base=opts.port_base)
 
     # Track unfinished cells so the SIGINT path can record `aborted` for them
@@ -267,13 +268,10 @@ def run_matrix(plan: MatrixPlan, opts: ExecutorOpts, cell_runner_fn) -> dict[str
     finished: dict[str, dict[str, Any]] = {}
     aborted_event = threading.Event()
 
-    def _cell_artifact_dir(cell: CellSpec) -> Path:
-        return runs_dir / cell.cell_id
-
     def _run_one(cell: CellSpec, port: int) -> dict[str, Any]:
         if aborted_event.is_set():
             return _aborted_result(cell.cell_id, "interrupted before launch")
-        art = _cell_artifact_dir(cell)
+        art = _cell_artifact_dir(runs_dir, cell)
         art.mkdir(parents=True, exist_ok=True)
         result = cell_runner_fn(cell, art, port)
         with cells_lock:
@@ -282,7 +280,6 @@ def run_matrix(plan: MatrixPlan, opts: ExecutorOpts, cell_runner_fn) -> dict[str
 
     workers = max(1, int(opts.parallel))
     results: list[dict[str, Any]] = []
-
     prev_handler = None
     # Shared between the SIGINT handler and the parallel branch: holds the
     # {future: cell} map so the handler can cancel any not-yet-started future
@@ -346,6 +343,36 @@ def run_matrix(plan: MatrixPlan, opts: ExecutorOpts, cell_runner_fn) -> dict[str
         if prev_handler is not None:
             signal.signal(signal.SIGINT, prev_handler)
 
+    return finished
+
+
+def run_matrix(plan: MatrixPlan, opts: ExecutorOpts, cell_runner_fn) -> dict[str, Any]:
+    """Execute every cell with bounded parallelism and write matrix.json.
+
+    `cell_runner_fn(cell: CellSpec, artifact_dir: Path, port: int) -> dict`
+    returns the per-cell result.json dict. The matrix executor is unaware of
+    how the cell runs (real QEMU, mocked subprocess, dry-run): it sees only
+    the result dict and aggregates totals.
+    """
+    if opts.share_dir is not None:
+        assert_share_dir(
+            opts.share_dir,
+            required_share_entries([cell.workload for cell in plan.cells]),
+        )
+
+    matrix = schemas.empty_matrix()
+    matrix["started_at"] = _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds")
+    matrix["config"] = {
+        "parallel": opts.parallel,
+        "matrix_path": str(opts.matrix_path) if opts.matrix_path else None,
+        "port_base": opts.port_base,
+        "share_dir": str(opts.share_dir) if opts.share_dir else None,
+    }
+    runs_dir = opts.runs_root / _utc_now_id()
+    runs_dir.mkdir(parents=True, exist_ok=True)
+
+    finished = _execute_cells(plan, opts, cell_runner_fn, runs_dir)
+
     # Build the cells list from the planned set (so cells the runner never
     # got to land in matrix.json as `aborted`).
     cells_section: list[dict[str, Any]] = []
@@ -353,8 +380,8 @@ def run_matrix(plan: MatrixPlan, opts: ExecutorOpts, cell_runner_fn) -> dict[str
         result = finished.get(cell.cell_id)
         if result is None:
             result = _aborted_result(cell.cell_id, "interrupted before completion")
-            (_cell_artifact_dir(cell)).mkdir(parents=True, exist_ok=True)
-            (_cell_artifact_dir(cell) / "result.json").write_text(
+            (_cell_artifact_dir(runs_dir, cell)).mkdir(parents=True, exist_ok=True)
+            (_cell_artifact_dir(runs_dir, cell) / "result.json").write_text(
                 json.dumps(result, indent=2, sort_keys=True)
             )
         cells_section.append(
@@ -363,7 +390,7 @@ def run_matrix(plan: MatrixPlan, opts: ExecutorOpts, cell_runner_fn) -> dict[str
                 "verdict": result.get("verdict"),
                 "started_at": result.get("started_at"),
                 "finished_at": result.get("finished_at"),
-                "artifact_dir": str(_cell_artifact_dir(cell)),
+                "artifact_dir": str(_cell_artifact_dir(runs_dir, cell)),
             }
         )
     matrix["cells"] = cells_section
@@ -371,12 +398,3 @@ def run_matrix(plan: MatrixPlan, opts: ExecutorOpts, cell_runner_fn) -> dict[str
     matrix["finished_at"] = _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds")
     (runs_dir / "matrix.json").write_text(json.dumps(matrix, indent=2, sort_keys=True))
     return matrix
-
-
-def _aborted_result(cell_id: str, reason: str) -> dict[str, Any]:
-    """Synthetic result.json for a cell that never got to run."""
-    result = schemas.empty_result(cell_id)
-    result["verdict"] = "aborted"
-    result["reason"] = reason
-    result["finished_at"] = _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds")
-    return result

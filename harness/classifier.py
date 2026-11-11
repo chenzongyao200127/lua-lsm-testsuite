@@ -8,11 +8,11 @@ A "hit" is recorded as {pattern, line, substring} where:
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Iterator
+from collections.abc import Iterable
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-from .classifier_patterns import PATTERN_VERSION, PATTERNS
+from .classifier_patterns import PATTERNS
 
 
 @dataclass(frozen=True)
@@ -90,23 +90,3 @@ def classify_files_per_channel(paths: Iterable[Path]) -> dict[Path, list[Classif
             continue
         out[p] = classify_text(text)
     return out
-
-
-def has_any_log(paths: Iterable[Path]) -> bool:
-    """Return True if at least one of the dmesg paths exists with content."""
-    for path in paths:
-        if path and Path(path).exists() and Path(path).read_text(errors="replace").strip():
-            return True
-    return False
-
-
-def verdict_for_hits(hits: list[ClassifierHit]) -> str:
-    return "kernel-bug" if hits else "pass"
-
-
-def pattern_version() -> int:
-    return PATTERN_VERSION
-
-
-def iter_hit_dicts(hits: Iterable[ClassifierHit]) -> Iterator[dict]:
-    return (h.to_dict() for h in hits)

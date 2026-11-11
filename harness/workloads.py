@@ -131,15 +131,14 @@ def _record(
 ) -> None:
     """Append one (command, result) pair to the workload log + commands.sh."""
     ctx.record_command(cmd)
-    log_path = ctx.artifact_dir / log_name
-    existing = log_path.read_text() if log_path.exists() else ""
-    log_path.write_text(
-        existing
-        + f"# --- $ {cmd}\n"
-        + f"# returncode={ssh_result.returncode}\n"
-        + f"# --- stdout ---\n{ssh_result.stdout}\n"
-        + f"# --- stderr ---\n{ssh_result.stderr}\n"
+    entry = (
+        f"# --- $ {cmd}\n"
+        f"# returncode={ssh_result.returncode}\n"
+        f"# --- stdout ---\n{ssh_result.stdout}\n"
+        f"# --- stderr ---\n{ssh_result.stderr}\n"
     )
+    with open(ctx.artifact_dir / log_name, "a", encoding="utf-8") as fh:
+        fh.write(entry)
     result.returncode = ssh_result.returncode
     if ssh_result.returncode != 0 and not result.notes:
         result.notes = f"{result.name} step exited {ssh_result.returncode}"
@@ -464,25 +463,11 @@ def bench_short(target: ssh.SshTarget, ctx: CellContext) -> WorkloadResult:
     profile.setdefault("bench_loops", 1)
     profile.setdefault("workload_timeout_s", 60.0)
 
-    load_profile = dict(profile, bench_cmd="load")
-    ctx_load = CellContext(
-        cell_id=ctx.cell_id,
-        artifact_dir=ctx.artifact_dir,
-        target=ctx.target,
-        profile=load_profile,
-        commands=ctx.commands,
-    )
+    ctx_load = ctx.with_profile(**{**profile, "bench_cmd": "load"})
     out = bench(target, ctx_load)
     out.name = "bench-short"
 
-    unload_profile = dict(profile, bench_cmd="unload")
-    ctx_unload = CellContext(
-        cell_id=ctx.cell_id,
-        artifact_dir=ctx.artifact_dir,
-        target=ctx.target,
-        profile=unload_profile,
-        commands=ctx.commands,
-    )
+    ctx_unload = ctx.with_profile(**{**profile, "bench_cmd": "unload"})
     unload = bench(target, ctx_unload)
     # Surface a non-zero unload rc only when load succeeded; otherwise the
     # load failure is the real story and we don't want to clobber it.

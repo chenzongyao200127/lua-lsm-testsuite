@@ -282,6 +282,12 @@ def run_cell(inputs: CellInputs, host: HostEnv | None = None) -> dict[str, Any]:
     dmesg.log, journalctl-kb.txt, stats-before.txt, stats-after.txt,
     lsm_funcs-before.txt, lsm_funcs-after.txt, qemu-cmdline.txt,
     extra-cmdline.txt, result.json.
+
+    Structure: init result -> planning-time gates (KVM, cmdline composition,
+    perf warm marker) -> spawn -> boot/preflight gates -> workload ->
+    snapshots -> teardown capture -> classify. Every gate's early return
+    goes through _finish_early so a gate refusal always leaves a valid,
+    written result.json.
     """
     host = host if host is not None else detect()
     cell_id = inputs.cell_id or _make_cell_id(inputs.profile, inputs.workload_name)
@@ -305,9 +311,7 @@ def run_cell(inputs: CellInputs, host: HostEnv | None = None) -> dict[str, Any]:
     if skip is not None:
         result["verdict"] = skip["verdict"]
         result["reason"] = skip["reason"]
-        result["finished_at"] = _now_iso()
-        _write_result(art, result)
-        return result
+        return _finish_early(result, art)
 
     # Build EXTRA_CMDLINE and the launch env.
     try:
@@ -315,9 +319,7 @@ def run_cell(inputs: CellInputs, host: HostEnv | None = None) -> dict[str, Any]:
     except Exception as e:
         result["verdict"] = "harness-error"
         result["reason"] = f"cmdline composition failed: {e}"
-        result["finished_at"] = _now_iso()
-        _write_result(art, result)
-        return result
+        return _finish_early(result, art)
     result["cmdline"] = env["EXTRA_CMDLINE"]
     _write_text(art / "extra-cmdline.txt", env["EXTRA_CMDLINE"] + "\n")
     _write_text(art / "qemu-cmdline.txt", qemu.render_launch_command(inputs.launcher, env) + "\n")
@@ -328,18 +330,11 @@ def run_cell(inputs: CellInputs, host: HostEnv | None = None) -> dict[str, Any]:
     # Perf cells require a warm rootfs (cold-boot dwarfs the measurement).
     # Gate BEFORE qemu.spawn so the runner does not pay boot time for a cell
     # that's going to be discarded as skip:image-not-warm anyway.
-    if profile.get("kind") == "perf" and inputs.rootfs_image is not None:
-        marker = inputs.warm_marker
-        if marker is None:
-            marker = preflight.default_warm_marker(Path(inputs.rootfs_image))
-        warm_skip = preflight.image_warm_check(inputs.rootfs_image, marker)
-        if warm_skip is not None:
-            result["verdict"] = str(warm_skip["verdict"])
-            result["reason"] = str(warm_skip["reason"])
-            result["finished_at"] = _now_iso()
-            result["commands"] = list(ctx.commands)
-            _write_result(art, result)
-            return result
+    warm_skip = _perf_warm_skip(inputs, profile)
+    if warm_skip is not None:
+        result["verdict"] = str(warm_skip["verdict"])
+        result["reason"] = str(warm_skip["reason"])
+        return _finish_early(result, art, ctx)
 
     handle: qemu.QemuHandle | None = None
     registered = False
@@ -456,20 +451,7 @@ def run_cell(inputs: CellInputs, host: HostEnv | None = None) -> dict[str, Any]:
                 "deltas": perf_snapshot.diff(before, after),
             }
 
-        if follower_started:
-            _stop_dmesg_follower(inputs.ssh_target)
-            # Give the kernel a moment to flush the last lines through 9p.
-            time.sleep(0.5)
-        else:
-            # No follower: capture dmesg one-shot at teardown.
-            dmesg_text = _capture(inputs.ssh_target, GUEST_DMESG_CMD, timeout=60.0)
-            if dmesg_text is not None:
-                (art / "dmesg.log").write_text(dmesg_text)
-
-        # journalctl-kb.txt is captured at teardown regardless of follower.
-        journal_text = _capture(inputs.ssh_target, GUEST_JOURNAL_CMD, timeout=60.0)
-        if journal_text is not None:
-            (art / "journalctl-kb.txt").write_text(journal_text)
+        _teardown_logs(inputs, art, follower_started)
 
         return _classify_and_finalize(
             result,
@@ -484,6 +466,53 @@ def run_cell(inputs: CellInputs, host: HostEnv | None = None) -> dict[str, Any]:
             inputs.run_registry.unregister(cell_id)
         if handle is not None:
             qemu.stop(handle)
+
+
+def _finish_early(
+    result: dict[str, Any], art: Path, ctx: CellContext | None = None
+) -> dict[str, Any]:
+    """Stamp finished_at (+ commands when a ctx exists) and write result.json.
+
+    The shared tail of every planning-time gate refusal in run_cell.
+    """
+    result["finished_at"] = _now_iso()
+    if ctx is not None:
+        result["commands"] = list(ctx.commands)
+    _write_result(art, result)
+    return result
+
+
+def _perf_warm_skip(inputs: CellInputs, profile: Mapping[str, Any]) -> Mapping[str, str] | None:
+    """Warm-marker gate for perf cells; None means the cell may proceed."""
+    if profile.get("kind") != "perf" or inputs.rootfs_image is None:
+        return None
+    marker = inputs.warm_marker
+    if marker is None:
+        marker = preflight.default_warm_marker(Path(inputs.rootfs_image))
+    return preflight.image_warm_check(inputs.rootfs_image, marker)
+
+
+def _teardown_logs(inputs: CellInputs, art: Path, follower_started: bool) -> None:
+    """Capture the kernel's log channels at teardown.
+
+    With the dmesg follower running, stopping it and letting the 9p mount
+    flush is enough. Without one (unit tests, short-circuited cells), dmesg
+    is captured one-shot instead. journalctl is captured either way -- it is
+    the tertiary audit trail and never influences the verdict.
+    """
+    if follower_started:
+        _stop_dmesg_follower(inputs.ssh_target)
+        # Give the kernel a moment to flush the last lines through 9p.
+        time.sleep(0.5)
+    else:
+        # No follower: capture dmesg one-shot at teardown.
+        dmesg_text = _capture(inputs.ssh_target, GUEST_DMESG_CMD, timeout=60.0)
+        if dmesg_text is not None:
+            (art / "dmesg.log").write_text(dmesg_text)
+
+    journal_text = _capture(inputs.ssh_target, GUEST_JOURNAL_CMD, timeout=60.0)
+    if journal_text is not None:
+        (art / "journalctl-kb.txt").write_text(journal_text)
 
 
 def _capture(target: ssh.SshTarget, cmd: str, timeout: float) -> str | None:
