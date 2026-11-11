@@ -221,26 +221,23 @@ def test_lkdtm_returns_77_when_provoke_missing(tmp_path, monkeypatch):
 # normalization in `__main__.py::_resolve_policy_paths`.
 
 
-def test_short_name_gains_lua_suffix():
-    assert workloads._policy_file_in_guest("hello") == "/mnt/host/lua-lsm-tools/examples/hello.lua"
-
-
-def test_dot_lua_name_passes_through():
-    assert (
-        workloads._policy_file_in_guest("denyfile.lua")
-        == "/mnt/host/lua-lsm-tools/examples/denyfile.lua"
-    )
-
-
-def test_absolute_path_passes_through_unchanged():
-    assert (
-        workloads._policy_file_in_guest("/mnt/host/policies/custom.lua")
-        == "/mnt/host/policies/custom.lua"
-    )
-
-
-def test_default_when_policy_unset_is_hello_dot_lua():
-    assert workloads._policy_file_in_guest(None) == "/mnt/host/lua-lsm-tools/examples/hello.lua"
+@pytest.mark.parametrize(
+    ("policy", "expected_guest_path"),
+    [
+        pytest.param("hello", "/mnt/host/lua-lsm-tools/examples/hello.lua", id="short-name"),
+        pytest.param(
+            "denyfile.lua", "/mnt/host/lua-lsm-tools/examples/denyfile.lua", id="dot-lua-name"
+        ),
+        pytest.param(
+            "/mnt/host/policies/custom.lua",
+            "/mnt/host/policies/custom.lua",
+            id="absolute-path",
+        ),
+        pytest.param(None, "/mnt/host/lua-lsm-tools/examples/hello.lua", id="default"),
+    ],
+)
+def test_policy_name_normalizes_to_guest_path(policy, expected_guest_path):
+    assert workloads._policy_file_in_guest(policy) == expected_guest_path
 
 
 # --- BenchUsesRealLuaContractTests ---

@@ -15,7 +15,7 @@ from unittest.mock import MagicMock
 
 import pytest
 from harness import __main__ as cli
-from harness import bisect, cell_runner, hostenv, qemu, schemas, ssh
+from harness import bisect, cell_runner, hostenv, ksft, qemu, schemas, ssh
 
 
 def _fake_ssh_run(target, cmd, timeout_s=120.0):
@@ -65,7 +65,7 @@ def test_run_writes_cell_json_before_boot_attempt(tmp_path, linux_host, monkeypa
     # KVM not required, so the runner should still spawn (and our
     # mock raises). The cell.json must land regardless.
     rc = cli.main(args)
-    assert rc != cli.KSFT_PASS
+    assert rc != ksft.KSFT_PASS
     cell_dirs = list((tmp_path / "runs").glob("*"))
     assert len(cell_dirs) == 1
     cell_dir = cell_dirs[0]
@@ -107,7 +107,7 @@ def test_run_smoke_pass_emits_result_json_with_pass_verdict(
 
     monkeypatch.setattr(qemu, "spawn", _spawn_with_log)
     rc = cli.main(args)
-    assert rc == cli.KSFT_PASS
+    assert rc == ksft.KSFT_PASS
     cell_dirs = list((tmp_path / "runs").glob("*"))
     assert len(cell_dirs) == 1
     result = json.loads((cell_dirs[0] / "result.json").read_text())
@@ -131,7 +131,7 @@ def test_matrix_rejects_share_dir_without_required_entries(tmp_path, linux_host)
             str(tmp_path / "runs"),
         ]
     )
-    assert rc == cli.KSFT_FAIL
+    assert rc == ksft.KSFT_FAIL
 
 
 def _pass_result_stub(inputs, host=None):
@@ -174,7 +174,7 @@ def test_matrix_dispatches_each_cell_with_distinct_port(tmp_path, linux_host, mo
     ]
     monkeypatch.setattr(cell_runner, "run_cell", _stub_run_cell)
     rc = cli.main(args)
-    assert rc == cli.KSFT_PASS
+    assert rc == ksft.KSFT_PASS
     # 32 cells, 32 distinct ports starting at 11000.
     assert len(seen_ports) == 32
     assert len(set(seen_ports)) == 32
@@ -246,14 +246,14 @@ def test_image_warm_writes_marker(tmp_path):
     image = tmp_path / "rootfs.img"
     image.write_text("fake")
     rc = cli.main(["image-warm", "--image", str(image)])
-    assert rc == cli.KSFT_PASS
+    assert rc == ksft.KSFT_PASS
     marker = image.with_suffix(".img.warm-marker")
     assert marker.exists()
 
 
 def test_image_warm_missing_image_returns_fail():
     rc = cli.main(["image-warm", "--image", "/nonexistent/rootfs.img"])
-    assert rc == cli.KSFT_FAIL
+    assert rc == ksft.KSFT_FAIL
 
 
 class TestCliNoKvmEnvOverride:
@@ -428,7 +428,7 @@ def test_detach_vm_prints_pid_and_port_skips_workload_and_result_json(
     monkeypatch.setattr("harness.workloads.by_name", lambda _name: workload_called)
     rc = cli.main(args)
 
-    assert rc == cli.KSFT_PASS
+    assert rc == ksft.KSFT_PASS
     spawn_mock.assert_called_once()
     stop_mock.assert_not_called()
     workload_called.assert_not_called()
@@ -480,7 +480,7 @@ def test_interactive_passes_interactive_true_to_spawn_and_writes_result(
     monkeypatch.setattr(ssh, "run", _fake_ssh_run)
     monkeypatch.setattr(ssh, "fetch_text", lambda *a, **kw: None)
     rc = cli.main(args)
-    assert rc == cli.KSFT_PASS
+    assert rc == ksft.KSFT_PASS
     assert captured_kwargs.get("interactive") is True
     cell_dirs = list((tmp_path / "runs").glob("*"))
     assert len(cell_dirs) == 1
@@ -489,10 +489,9 @@ def test_interactive_passes_interactive_true_to_spawn_and_writes_result(
     )
 
 
-def test_assert_kconfig_profile_accepts_standard_and_full():
-    schemas.assert_kconfig_profile("standard")
-    schemas.assert_kconfig_profile("full")
-    schemas.assert_kconfig_profile(None)
+@pytest.mark.parametrize("profile", ["standard", "full", None])
+def test_assert_kconfig_profile_accepts_known_profiles(profile):
+    schemas.assert_kconfig_profile(profile)
 
 
 def test_assert_kconfig_profile_rejects_unknown():

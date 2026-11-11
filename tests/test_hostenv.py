@@ -3,6 +3,7 @@
 import os
 
 import pytest
+from harness import hostenv
 from harness.hostenv import (
     KVM_PATH_ENV,
     HostEnv,
@@ -14,9 +15,16 @@ from harness.hostenv import (
 )
 
 
-def test_detect_real_returns_object():
+def test_detect_real_returns_object(monkeypatch):
+    # Pin the platform probes so the test does not depend on the host it
+    # runs on; the KVM lookup still follows the real env/default path.
+    monkeypatch.setattr(hostenv.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(hostenv.platform, "release", lambda: "6.10.0-test")
+    monkeypatch.delenv(KVM_PATH_ENV, raising=False)
     host = detect()
-    assert host.system in {"Linux", "Darwin", "Windows", "FreeBSD", "OpenBSD"}
+    assert host.system == "Linux"
+    assert host.release == "6.10.0-test"
+    assert host.has_kvm == os.path.exists("/dev/kvm")
 
 
 def test_assert_supported_refuses_darwin():

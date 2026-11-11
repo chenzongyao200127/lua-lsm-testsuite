@@ -9,6 +9,7 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import MagicMock
 
+import pytest
 from harness import cell_runner, preflight, qemu, schemas, ssh
 
 # ---------------------------------------------------------------------------
@@ -216,7 +217,17 @@ def _funcs_text() -> str:
     )
 
 
-def test_perf_skip_when_only_stats_present(tmp_path, monkeypatch, linux_host):
+@pytest.mark.parametrize(
+    ("stats_present", "funcs_present"),
+    [
+        pytest.param(True, False, id="only-stats"),
+        pytest.param(False, True, id="only-lsm-funcs"),
+        pytest.param(False, False, id="both-missing"),
+    ],
+)
+def test_perf_skip_when_either_side_missing(
+    stats_present, funcs_present, tmp_path, monkeypatch, linux_host
+):
     tdp = tmp_path
     art = tdp / "perf"
     rootfs = tdp / "rootfs.img"
@@ -225,53 +236,13 @@ def test_perf_skip_when_only_stats_present(tmp_path, monkeypatch, linux_host):
     out = _run_perf_with_fetch(
         art,
         rootfs,
-        stats_text=_stats_text(),
-        funcs_text=None,
+        stats_text=_stats_text() if stats_present else None,
+        funcs_text=_funcs_text() if funcs_present else None,
         workload_invoked=workload_invoked,
         monkeypatch=monkeypatch,
     )
     assert out["verdict"] == "skip:stats-unavailable"
     assert not workload_invoked, "workload must not run when perf preflight skips"
-    assert out["perf"].get("snapshots") is None
-    assert out["perf"].get("deltas") is None
-
-
-def test_perf_skip_when_only_lsm_funcs_present(tmp_path, monkeypatch, linux_host):
-    tdp = tmp_path
-    art = tdp / "perf"
-    rootfs = tdp / "rootfs.img"
-    rootfs.write_bytes(b"")
-    workload_invoked: list[bool] = []
-    out = _run_perf_with_fetch(
-        art,
-        rootfs,
-        stats_text=None,
-        funcs_text=_funcs_text(),
-        workload_invoked=workload_invoked,
-        monkeypatch=monkeypatch,
-    )
-    assert out["verdict"] == "skip:stats-unavailable"
-    assert not workload_invoked
-    assert out["perf"].get("snapshots") is None
-    assert out["perf"].get("deltas") is None
-
-
-def test_perf_skip_when_both_missing(tmp_path, monkeypatch, linux_host):
-    tdp = tmp_path
-    art = tdp / "perf"
-    rootfs = tdp / "rootfs.img"
-    rootfs.write_bytes(b"")
-    workload_invoked: list[bool] = []
-    out = _run_perf_with_fetch(
-        art,
-        rootfs,
-        stats_text=None,
-        funcs_text=None,
-        workload_invoked=workload_invoked,
-        monkeypatch=monkeypatch,
-    )
-    assert out["verdict"] == "skip:stats-unavailable"
-    assert not workload_invoked
     assert out["perf"].get("snapshots") is None
     assert out["perf"].get("deltas") is None
 

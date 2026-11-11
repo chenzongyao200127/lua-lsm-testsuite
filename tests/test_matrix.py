@@ -8,7 +8,7 @@ from unittest.mock import MagicMock
 
 import pytest
 from harness import __main__ as cli
-from harness import cell_runner, matrix, qemu, run_registry, schemas, ssh
+from harness import cell_runner, ksft, matrix, qemu, run_registry, schemas, ssh
 
 
 def test_expand_cartesian_product():
@@ -259,7 +259,7 @@ def test_matrix_with_invalid_profile_in_axis_fails_before_runs_dir(tmp_path, lin
         "/nonexistent/run.sh",
     ]
     rc = cli.main(args)
-    assert rc == cli.KSFT_FAIL, "matrix with bogus kconfig profile must fail at planning"
+    assert rc == ksft.KSFT_FAIL, "matrix with bogus kconfig profile must fail at planning"
     assert not (tdp / "runs").exists(), "runs dir must not be created when a profile is invalid"
 
 

@@ -234,41 +234,15 @@ def _clean_log(art: Path):
     (art / "dmesg.log").write_text("[    0.000] Linux version 6.10\n")
 
 
-def test_smoke_nonzero_rc_emits_workload_fail(tmp_path):
+@pytest.mark.parametrize("workload", ["smoke", "bench", "unixbench", "verify-cleanup"])
+def test_nonzero_rc_emits_workload_fail(workload, tmp_path):
     art = tmp_path
     _clean_log(art)
     r = schemas.empty_result("wf_cell")
-    inputs, ctx = _wf_ctx(art, "smoke")
+    inputs, ctx = _wf_ctx(art, workload)
     out = cell_runner._classify_and_finalize(r, art, inputs, ctx, 1)
     assert out["verdict"] == "workload-fail"
     assert "1" in out["reason"]
-
-
-def test_bench_nonzero_rc_emits_workload_fail(tmp_path):
-    art = tmp_path
-    _clean_log(art)
-    r = schemas.empty_result("wf_cell")
-    inputs, ctx = _wf_ctx(art, "bench")
-    out = cell_runner._classify_and_finalize(r, art, inputs, ctx, 1)
-    assert out["verdict"] == "workload-fail"
-
-
-def test_unixbench_nonzero_rc_emits_workload_fail(tmp_path):
-    art = tmp_path
-    _clean_log(art)
-    r = schemas.empty_result("wf_cell")
-    inputs, ctx = _wf_ctx(art, "unixbench")
-    out = cell_runner._classify_and_finalize(r, art, inputs, ctx, 2)
-    assert out["verdict"] == "workload-fail"
-
-
-def test_verify_cleanup_nonzero_rc_emits_workload_fail(tmp_path):
-    art = tmp_path
-    _clean_log(art)
-    r = schemas.empty_result("wf_cell")
-    inputs, ctx = _wf_ctx(art, "verify-cleanup")
-    out = cell_runner._classify_and_finalize(r, art, inputs, ctx, 1)
-    assert out["verdict"] == "workload-fail"
 
 
 def test_lkdtm_nonzero_rc_is_not_workload_fail(tmp_path):

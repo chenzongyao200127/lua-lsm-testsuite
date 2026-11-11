@@ -6,12 +6,13 @@ subcommand + shared helpers in cli.common). This module stays the
 scripts historically imported from it:
 
     main                 -> harness.cli.main
-    KSFT_PASS/FAIL/SKIP  -> harness.ksft (run/matrix contract, 0/1/4)
     _resolve_policy_paths(share_dir, policy_name, workload_name)
                          -> harness.cli.common.resolve_policy_paths (same
                             argument order)
 
-See harness.cli's package docstring for the subcommand/exit-code contract.
+Exit codes live in harness.ksft (run/matrix, 0/1/4) and harness.bisect
+(bisect-run, 0/1/125/128). See harness.cli's package docstring for the
+subcommand/exit-code contract.
 """
 
 from __future__ import annotations
@@ -22,12 +23,8 @@ import sys
 from .cli import main
 from .cli.common import resolve_policy_paths as _resolve_policy_paths
 from .hostenv import UnsupportedHostError
-from .ksft import KSFT_FAIL, KSFT_PASS, KSFT_SKIP
 
 __all__ = [
-    "KSFT_FAIL",
-    "KSFT_PASS",
-    "KSFT_SKIP",
     "_resolve_policy_paths",
     "main",
 ]

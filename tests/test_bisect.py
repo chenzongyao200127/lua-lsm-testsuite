@@ -333,24 +333,27 @@ def test_boot_timeout_is_untestable():
     )
 
 
-def test_all_skip_verdicts_are_untestable():
-    for v in (
+@pytest.mark.parametrize(
+    "verdict",
+    [
         "skip:no-kvm",
         "skip:stats-unavailable",
         "skip:image-not-warm",
         "skip:no-lkdtm",
         "skip:fixture-missing",
-    ):
-        assert bisect_mod.exit_code_from_cell_result({"verdict": v}) == bisect_mod.KSFT_SKIP, (
-            f"{v} should map to 125"
-        )
+    ],
+)
+def test_skip_verdicts_are_untestable(verdict):
+    assert bisect_mod.exit_code_from_cell_result({"verdict": verdict}) == bisect_mod.KSFT_SKIP, (
+        f"{verdict} should map to 125"
+    )
 
 
-def test_harness_error_aborts():
-    for v in ("harness-error", "aborted", "no-dmesg"):
-        assert bisect_mod.exit_code_from_cell_result({"verdict": v}) == bisect_mod.KSFT_ABORT, (
-            f"{v} should abort"
-        )
+@pytest.mark.parametrize("verdict", ["harness-error", "aborted", "no-dmesg"])
+def test_harness_error_verdicts_abort(verdict):
+    assert bisect_mod.exit_code_from_cell_result({"verdict": verdict}) == bisect_mod.KSFT_ABORT, (
+        f"{verdict} should abort"
+    )
 
 
 def test_bundle_error_aborts_regardless_of_verdict():

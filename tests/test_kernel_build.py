@@ -12,7 +12,7 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 from harness import __main__ as cli
-from harness import cell_runner, qemu, ssh, workloads
+from harness import cell_runner, ksft, qemu, ssh, workloads
 
 # ---------------------------------------------------------------------------
 # Moved from tests/test_round2.py (round-2 dissolution).
@@ -82,7 +82,7 @@ def test_build_kernel_requires_kernel_tree(tmp_path, monkeypatch, linux_host):
     monkeypatch.setattr(cli.subprocess, "run", _record)
     rc = cli.main(args)
 
-    assert rc == cli.KSFT_FAIL, "--build-kernel without --kernel-tree must fail at planning"
+    assert rc == ksft.KSFT_FAIL, "--build-kernel without --kernel-tree must fail at planning"
     assert not (tdp / "runs").exists(), "runs dir must not be created when --kernel-tree is missing"
     helper_calls = [c for c in called if str(c[0]).endswith("enable-debug-kconfig.sh")]
     assert helper_calls == [], "helper must not be invoked when --kernel-tree is missing"
@@ -136,7 +136,7 @@ def test_build_kernel_rejects_nonexistent_kernel_tree(tmp_path, monkeypatch, lin
     monkeypatch.setattr(cli.subprocess, "run", _record)
     rc = cli.main(args)
 
-    assert rc == cli.KSFT_FAIL
+    assert rc == ksft.KSFT_FAIL
     helper_calls = [c for c in called if str(c[0]).endswith("enable-debug-kconfig.sh")]
     assert helper_calls == [], "helper must not be invoked when --kernel-tree path is missing"
 
@@ -278,4 +278,4 @@ def test_build_kernel_against_helper_that_requires_kernel(tmp_path, monkeypatch,
     # script. If our wiring drops --kernel, the helper exits 1
     # and the matrix planning gate returns KSFT_FAIL.
     rc = cli.main(args)
-    assert rc != cli.KSFT_FAIL, "helper that requires --kernel must succeed when we pass --kernel"
+    assert rc != ksft.KSFT_FAIL, "helper that requires --kernel must succeed when we pass --kernel"
