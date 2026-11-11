@@ -28,7 +28,6 @@ inferred from surrounding frames when the header was unparseable.
 
 from __future__ import annotations
 
-import datetime as _dt
 import hashlib
 import json
 import os
@@ -40,6 +39,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from . import schemas
+from .timeutil import now_iso
 
 
 @dataclass
@@ -86,7 +86,8 @@ class BundleStore:
 
 
 def _now_iso() -> str:
-    return _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds")
+    # Kept as a thin alias: call sites predate harness.timeutil.
+    return now_iso()
 
 
 def _git_head_sha(tree: Path) -> str | None:

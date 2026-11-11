@@ -111,6 +111,7 @@ class JUnitCliWritesFileTests(unittest.TestCase):
         from harness import __main__ as cli
         from harness import cell_runner
         from harness import matrix as matrix_mod
+        from harness.cli import common as cli_common
 
         def _stub(inputs, host=None):
             inputs.artifact_dir.mkdir(parents=True, exist_ok=True)
@@ -141,7 +142,7 @@ class JUnitCliWritesFileTests(unittest.TestCase):
             with (
                 patch.object(cell_runner, "run_cell", side_effect=_stub),
                 patch.object(matrix_mod, "assert_share_dir", lambda *_args, **_kw: None),
-                patch.object(cli, "_enforce_supported_host", lambda: None),
+                patch.object(cli_common, "enforce_supported_host", lambda: None),
                 redirect_stdout(buf),
             ):
                 rc = cli.main(

@@ -23,7 +23,7 @@ dev = [
 lua-lsm-testsuite = "harness.__main__:main"
 
 [tool.setuptools]
-packages = ["harness"]
+packages = ["harness", "harness.cli"]
 
 [tool.pytest.ini_options]
 minversion = "8.0"

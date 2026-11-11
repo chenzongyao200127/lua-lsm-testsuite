@@ -39,12 +39,14 @@ from . import (
 from .celltypes import CellContext, WorkloadFn, WorkloadResult
 from .cmdline import compose_env
 from .hostenv import HostEnv, cell_kvm_check, detect
+from .timeutil import now_iso
 
 __all__ = [
     "CellContext",
     "CellInputs",
     "WorkloadFn",
     "WorkloadResult",
+    "derive_guest_relpath",
     "run_cell",
 ]
 
@@ -116,7 +118,8 @@ def _make_cell_id(profile: Mapping[str, Any], workload_name: str) -> str:
 
 
 def _now_iso() -> str:
-    return _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds")
+    # Kept as a thin alias: call sites predate harness.timeutil.
+    return now_iso()
 
 
 def _write_text(path: Path, text: str) -> None:
@@ -210,7 +213,7 @@ def _check_workload_fixture(
     return None
 
 
-def _derive_guest_relpath(
+def derive_guest_relpath(
     artifact_dir: Path, workspace_root: Path | None, override: str | None
 ) -> str | None:
     if override is not None:
@@ -394,7 +397,7 @@ def run_cell(inputs: CellInputs, host: HostEnv | None = None) -> dict[str, Any]:
         # Start the in-guest dmesg follower so we capture the splat as it's
         # printed, not just whatever survived to teardown. Skip when we
         # have no relpath to write into (unit tests, image-warm).
-        guest_rel = _derive_guest_relpath(art, inputs.workspace_root, inputs.guest_artifact_relpath)
+        guest_rel = derive_guest_relpath(art, inputs.workspace_root, inputs.guest_artifact_relpath)
         follower_started = False
         if guest_rel is not None:
             _start_dmesg_follower(inputs.ssh_target, guest_rel)
