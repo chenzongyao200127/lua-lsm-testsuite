@@ -11,9 +11,9 @@ verdict == "skip:stats-unavailable" (a SKIP-class verdict), NOT a silent pass.
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Mapping
 
 from . import schemas
 
@@ -34,7 +34,10 @@ class Snapshot:
     lsm_funcs: dict[str, dict[str, int]] = field(default_factory=dict)
 
     def to_dict(self) -> dict:
-        return {"counters": dict(self.counters), "lsm_funcs": {k: dict(v) for k, v in self.lsm_funcs.items()}}
+        return {
+            "counters": dict(self.counters),
+            "lsm_funcs": {k: dict(v) for k, v in self.lsm_funcs.items()},
+        }
 
 
 def parse_stats_text(text: str) -> dict[str, int]:
@@ -133,7 +136,9 @@ def diff(before: Snapshot, after: Snapshot) -> dict:
     return {"counters": counters, "lsm_funcs": lsm_funcs}
 
 
-def stats_available_skip_payload(reason: str = "CONFIG_SECURITY_LUA_LSM_STATS not enabled") -> Mapping[str, object]:
+def stats_available_skip_payload(
+    reason: str = "CONFIG_SECURITY_LUA_LSM_STATS not enabled",
+) -> Mapping[str, object]:
     """Helper that builds the SKIP-class payload for a perf cell with no stats."""
     return {
         "verdict": "skip:stats-unavailable",

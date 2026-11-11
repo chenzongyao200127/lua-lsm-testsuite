@@ -23,23 +23,31 @@ from pathlib import Path
 
 @dataclass(frozen=True)
 class SshTarget:
-    host: str          # typically "127.0.0.1"
-    port: int          # HOST_SSH_PORT
-    user: str          # typically "root"
-    key_path: Path     # private key for cell
+    host: str  # typically "127.0.0.1"
+    port: int  # HOST_SSH_PORT
+    user: str  # typically "root"
+    key_path: Path  # private key for cell
 
 
 def _base_ssh_args(target: SshTarget) -> list[str]:
     return [
         "ssh",
-        "-i", str(target.key_path),
-        "-p", str(target.port),
-        "-o", "StrictHostKeyChecking=no",
-        "-o", "UserKnownHostsFile=/dev/null",
-        "-o", "LogLevel=ERROR",
-        "-o", "BatchMode=yes",
-        "-o", "ServerAliveInterval=15",
-        "-o", "ServerAliveCountMax=3",
+        "-i",
+        str(target.key_path),
+        "-p",
+        str(target.port),
+        "-o",
+        "StrictHostKeyChecking=no",
+        "-o",
+        "UserKnownHostsFile=/dev/null",
+        "-o",
+        "LogLevel=ERROR",
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        "ServerAliveInterval=15",
+        "-o",
+        "ServerAliveCountMax=3",
         f"{target.user}@{target.host}",
     ]
 
@@ -55,7 +63,7 @@ def wait_for_ssh(target: SshTarget, timeout_s: float = 120.0, poll_s: float = 1.
     while time.monotonic() < deadline:
         try:
             r = subprocess.run(
-                _base_ssh_args(target) + ["-o", "ConnectTimeout=2", "true"],
+                [*_base_ssh_args(target), "-o", "ConnectTimeout=2", "true"],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 timeout=5,
@@ -88,9 +96,8 @@ def run(target: SshTarget, cmd: str, timeout_s: float = 120.0) -> SshResult:
     # ($0, $1, ...). Quote the whole `bash -lc <cmd>` as a single ssh arg.
     remote = f"bash -lc {shlex.quote(cmd)}"
     proc = subprocess.run(
-        _base_ssh_args(target) + [remote],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        [*_base_ssh_args(target), remote],
+        capture_output=True,
         timeout=timeout_s,
     )
     return SshResult(

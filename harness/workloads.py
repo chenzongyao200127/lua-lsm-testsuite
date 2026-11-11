@@ -55,6 +55,7 @@ DEFAULT_SMOKE_POLICY_NAME = "hello"
 # guest fixture requirements, policy resolution, share-dir requirements, and
 # the CLI's --workload choices all derive from this table.
 
+
 @dataclass(frozen=True)
 class WorkloadSpec:
     name: str
@@ -104,8 +105,9 @@ def policy_guest_path(workload_name: str, profile_policy: str | None) -> str:
     return f"{GUEST_HOST_SHARE}/{guest_dir}/{normalize_policy_filename(name)}"
 
 
-def policy_host_path(share_dir: Path | None, workload_name: str,
-                     policy_name: str | None) -> tuple[Path, ...]:
+def policy_host_path(
+    share_dir: Path | None, workload_name: str, policy_name: str | None
+) -> tuple[Path, ...]:
     """Host-side policy path(s) a cell will register, relative to share_dir.
 
     Returns a tuple of paths suitable for BundleSources.policies. When
@@ -124,8 +126,9 @@ def policy_host_path(share_dir: Path | None, workload_name: str,
     return (Path(share_dir) / guest_dir / normalize_policy_filename(name),)
 
 
-def _record(result: WorkloadResult, ctx: CellContext, log_name: str,
-            cmd: str, ssh_result: ssh.SshResult) -> None:
+def _record(
+    result: WorkloadResult, ctx: CellContext, log_name: str, cmd: str, ssh_result: ssh.SshResult
+) -> None:
     """Append one (command, result) pair to the workload log + commands.sh."""
     ctx.record_command(cmd)
     log_path = ctx.artifact_dir / log_name
@@ -212,10 +215,7 @@ def smoke(target: ssh.SshTarget, ctx: CellContext) -> WorkloadResult:
 def functional(target: ssh.SshTarget, ctx: CellContext) -> WorkloadResult:
     """Run the self-contained Lua-LSM policy API and dispatch assertions."""
     out = WorkloadResult(name="functional")
-    script = (
-        f"{GUEST_HOST_SHARE}/{LUA_LSM_TESTSUITE_FIXTURES}/"
-        "guest/functional_policy.sh"
-    )
+    script = f"{GUEST_HOST_SHARE}/{LUA_LSM_TESTSUITE_FIXTURES}/guest/functional_policy.sh"
     timeout = float(ctx.profile.get("workload_timeout_s", 120.0))
 
     cmd = f"bash {shlex.quote(script)}"
@@ -297,10 +297,7 @@ def unixbench(target: ssh.SshTarget, ctx: CellContext) -> WorkloadResult:
     ub_dir = f"{GUEST_HOST_SHARE}/{UNIXBENCH_DIR}"
 
     cell_rel = ctx.profile.get("guest_artifact_relpath")
-    if cell_rel:
-        out_dir = f"{GUEST_HOST_SHARE}/{cell_rel}"
-    else:
-        out_dir = "/tmp/lua-lsm-unixbench"
+    out_dir = f"{GUEST_HOST_SHARE}/{cell_rel}" if cell_rel else "/tmp/lua-lsm-unixbench"
 
     cpus = int(ctx.profile.get("unixbench_cpus", 1))
     iters = int(ctx.profile.get("unixbench_iters", 1))
@@ -308,9 +305,7 @@ def unixbench(target: ssh.SshTarget, ctx: CellContext) -> WorkloadResult:
 
     policy_path = _policy_file_in_guest(ctx.profile.get("policy"))
     policy_name = _policy_short_name(ctx.profile.get("policy"))
-    cmd_register = (
-        f"cat {shlex.quote(policy_path)} > {shlex.quote(SECURITYFS_REGISTER)}"
-    )
+    cmd_register = f"cat {shlex.quote(policy_path)} > {shlex.quote(SECURITYFS_REGISTER)}"
     r_reg = ssh.run(target, cmd_register, timeout_s=30.0)
     _record(out, ctx, "workload-unixbench.log", cmd_register, r_reg)
 
@@ -327,9 +322,7 @@ def unixbench(target: ssh.SshTarget, ctx: CellContext) -> WorkloadResult:
         _record(out, ctx, "workload-unixbench.log", cmd, r)
         wrapper_rc = r.returncode
 
-    cmd_unregister = (
-        f"echo {shlex.quote(policy_name)} > {shlex.quote(SECURITYFS_UNREGISTER)}"
-    )
+    cmd_unregister = f"echo {shlex.quote(policy_name)} > {shlex.quote(SECURITYFS_UNREGISTER)}"
     r_unreg = ssh.run(target, cmd_unregister, timeout_s=30.0)
     _record(out, ctx, "workload-unixbench.log", cmd_unregister, r_unreg)
 
@@ -360,16 +353,27 @@ def unixbench(target: ssh.SshTarget, ctx: CellContext) -> WorkloadResult:
 
 # Files the cell runner / workload writes at the cell root and which the
 # unixbench normalizer must NOT move into results/.
-_CELL_ROOT_RESERVED_NAMES: frozenset[str] = frozenset({
-    "cell.json", "result.json", "extra-cmdline.txt", "qemu-cmdline.txt",
-    "serial.log", "dmesg.log", "journalctl-kb.txt",
-    "stats-before.txt", "stats-after.txt",
-    "lsm_funcs-before.txt", "lsm_funcs-after.txt",
-    "workload-unixbench.log",
-    "system.txt", "command.txt", "unixbench.log",
-    "results",
-    "bundles",
-})
+_CELL_ROOT_RESERVED_NAMES: frozenset[str] = frozenset(
+    {
+        "cell.json",
+        "result.json",
+        "extra-cmdline.txt",
+        "qemu-cmdline.txt",
+        "serial.log",
+        "dmesg.log",
+        "journalctl-kb.txt",
+        "stats-before.txt",
+        "stats-after.txt",
+        "lsm_funcs-before.txt",
+        "lsm_funcs-after.txt",
+        "workload-unixbench.log",
+        "system.txt",
+        "command.txt",
+        "unixbench.log",
+        "results",
+        "bundles",
+    }
+)
 
 
 def _normalize_unixbench_layout(cell_dir: Path) -> None:
@@ -493,59 +497,51 @@ def bench_short(target: ssh.SshTarget, ctx: CellContext) -> WorkloadResult:
 # policy resolution, share-dir requirements, the CLI's --workload choices --
 # derives from this table. Adding a workload means adding one entry here
 # (plus a config that selects it).
-SPECS.update({
-    "functional": WorkloadSpec(
-        name="functional",
-        fn=functional,
-        guest_fixtures=(
-            f"{GUEST_HOST_SHARE}/{LUA_LSM_TESTSUITE_FIXTURES}/guest/functional_policy.sh",
+SPECS.update(
+    {
+        "functional": WorkloadSpec(
+            name="functional",
+            fn=functional,
+            guest_fixtures=(
+                f"{GUEST_HOST_SHARE}/{LUA_LSM_TESTSUITE_FIXTURES}/guest/functional_policy.sh",
+            ),
+            policy_guest_dir=f"{LUA_LSM_TESTSUITE_FIXTURES}/policies",
+            default_policy="smoke.lua",
+            self_contained=True,
         ),
-        policy_guest_dir=f"{LUA_LSM_TESTSUITE_FIXTURES}/policies",
-        default_policy="smoke.lua",
-        self_contained=True,
-    ),
-    "smoke": WorkloadSpec(
-        name="smoke",
-        fn=smoke,
-        guest_fixtures=(
-            f"{GUEST_HOST_SHARE}/{LUA_LSM_TOOLS_EXAMPLES}/hello.lua",
+        "smoke": WorkloadSpec(
+            name="smoke",
+            fn=smoke,
+            guest_fixtures=(f"{GUEST_HOST_SHARE}/{LUA_LSM_TOOLS_EXAMPLES}/hello.lua",),
         ),
-    ),
-    "bench": WorkloadSpec(
-        name="bench",
-        fn=bench,
-        guest_fixtures=(
-            f"{GUEST_HOST_SHARE}/{LUA_LSM_TOOLS_TOOLS}/bench.lua",
+        "bench": WorkloadSpec(
+            name="bench",
+            fn=bench,
+            guest_fixtures=(f"{GUEST_HOST_SHARE}/{LUA_LSM_TOOLS_TOOLS}/bench.lua",),
         ),
-    ),
-    "bench-short": WorkloadSpec(
-        name="bench-short",
-        fn=bench_short,
-        guest_fixtures=(
-            f"{GUEST_HOST_SHARE}/{LUA_LSM_TOOLS_TOOLS}/bench.lua",
+        "bench-short": WorkloadSpec(
+            name="bench-short",
+            fn=bench_short,
+            guest_fixtures=(f"{GUEST_HOST_SHARE}/{LUA_LSM_TOOLS_TOOLS}/bench.lua",),
         ),
-    ),
-    "unixbench": WorkloadSpec(
-        name="unixbench",
-        fn=unixbench,
-        guest_fixtures=(
-            f"{GUEST_HOST_SHARE}/{LUA_LSM_TOOLS_TOOLS}/lua_lsm_unixbench.sh",
+        "unixbench": WorkloadSpec(
+            name="unixbench",
+            fn=unixbench,
+            guest_fixtures=(f"{GUEST_HOST_SHARE}/{LUA_LSM_TOOLS_TOOLS}/lua_lsm_unixbench.sh",),
         ),
-    ),
-    "verify-cleanup": WorkloadSpec(
-        name="verify-cleanup",
-        fn=verify_cleanup,
-        guest_fixtures=(
-            f"{GUEST_HOST_SHARE}/{LUA_LSM_TOOLS_TOOLS}/verify_module_cleanup.sh",
+        "verify-cleanup": WorkloadSpec(
+            name="verify-cleanup",
+            fn=verify_cleanup,
+            guest_fixtures=(f"{GUEST_HOST_SHARE}/{LUA_LSM_TOOLS_TOOLS}/verify_module_cleanup.sh",),
         ),
-    ),
-    "lkdtm": WorkloadSpec(
-        name="lkdtm",
-        fn=lkdtm,
-        # Uses /sys/kernel/debug/provoke-crash; checked at workload time.
-        guest_fixtures=(),
-    ),
-})
+        "lkdtm": WorkloadSpec(
+            name="lkdtm",
+            fn=lkdtm,
+            # Uses /sys/kernel/debug/provoke-crash; checked at workload time.
+            guest_fixtures=(),
+        ),
+    }
+)
 
 # The callable registry (CLI --workload choices, by_name lookups) derives
 # from SPECS so the two can never drift apart.

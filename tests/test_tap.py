@@ -63,10 +63,8 @@ class TapTests(unittest.TestCase):
         }
         out = tap.emit_tap(matrix)
         lines = out.strip().split("\n")
-        self.assertEqual(lines[0], "TAP version 13",
-                         "TAP header must be the first line")
-        self.assertEqual(lines[-1], "1..3",
-                         "plan line must be the last line")
+        self.assertEqual(lines[0], "TAP version 13", "TAP header must be the first line")
+        self.assertEqual(lines[-1], "1..3", "plan line must be the last line")
         # All test-point lines fall between header and plan.
         for inner in lines[1:-1]:
             self.assertFalse(inner.startswith("TAP version"))
@@ -96,7 +94,7 @@ class TapTests(unittest.TestCase):
         self.assertEqual(lines[0], "TAP version 13")
         self.assertEqual(lines[-1], "1..2")
         # The not ok line must appear before the plan.
-        not_ok_idx = next(i for i, l in enumerate(lines) if l.startswith("not ok"))
+        not_ok_idx = next(i for i, line in enumerate(lines) if line.startswith("not ok"))
         plan_idx = lines.index("1..2")
         self.assertLess(not_ok_idx, plan_idx)
 
@@ -107,19 +105,25 @@ class TapDefaultMatrixOutputTests(unittest.TestCase):
     caller explicitly opts in."""
 
     def test_default_matrix_stdout_has_no_tap_header(self):
-        from io import StringIO
-        from contextlib import redirect_stdout
         import json
-        from tempfile import TemporaryDirectory
+        from contextlib import redirect_stdout
+        from io import StringIO
         from pathlib import Path
+        from tempfile import TemporaryDirectory
         from unittest.mock import patch
-        from harness import __main__ as cli, cell_runner, matrix as matrix_mod
+
+        from harness import __main__ as cli
+        from harness import cell_runner
+        from harness import matrix as matrix_mod
 
         def _stub(inputs, host=None):
             inputs.artifact_dir.mkdir(parents=True, exist_ok=True)
             res = {
-                "schema_version": 1, "cell_id": inputs.cell_id,
-                "verdict": "pass", "started_at": None, "finished_at": None,
+                "schema_version": 1,
+                "cell_id": inputs.cell_id,
+                "verdict": "pass",
+                "started_at": None,
+                "finished_at": None,
             }
             (inputs.artifact_dir / "result.json").write_text(json.dumps(res))
             return res
@@ -127,23 +131,37 @@ class TapDefaultMatrixOutputTests(unittest.TestCase):
         with TemporaryDirectory() as td:
             tdp = Path(td)
             cfg = tdp / "tiny.json"
-            cfg.write_text(json.dumps({
-                "name": "t", "axes": {"x": [1]},
-                "defaults": {"kvm_required": False},
-            }))
+            cfg.write_text(
+                json.dumps(
+                    {
+                        "name": "t",
+                        "axes": {"x": [1]},
+                        "defaults": {"kvm_required": False},
+                    }
+                )
+            )
             buf = StringIO()
-            with patch.object(cell_runner, "run_cell", side_effect=_stub), \
-                 patch.object(matrix_mod, "assert_share_dir", lambda *_args, **_kw: None), \
-                 patch.object(cli, "_enforce_supported_host", lambda: None), \
-                 redirect_stdout(buf):
-                rc = cli.main([
-                    "matrix",
-                    "--config", str(cfg),
-                    "--ssh-key", "/dev/null",
-                    "--launcher", "/nonexistent/run.sh",
-                    "--runs-root", str(tdp / "runs"),
-                    "--port-base", "20000",
-                ])
+            with (
+                patch.object(cell_runner, "run_cell", side_effect=_stub),
+                patch.object(matrix_mod, "assert_share_dir", lambda *_args, **_kw: None),
+                patch.object(cli, "_enforce_supported_host", lambda: None),
+                redirect_stdout(buf),
+            ):
+                rc = cli.main(
+                    [
+                        "matrix",
+                        "--config",
+                        str(cfg),
+                        "--ssh-key",
+                        "/dev/null",
+                        "--launcher",
+                        "/nonexistent/run.sh",
+                        "--runs-root",
+                        str(tdp / "runs"),
+                        "--port-base",
+                        "20000",
+                    ]
+                )
             self.assertEqual(rc, 0)
             out = buf.getvalue()
             self.assertNotIn("TAP version 13", out)

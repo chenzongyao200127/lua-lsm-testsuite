@@ -12,8 +12,8 @@ from __future__ import annotations
 
 import re
 import sys
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Sequence
 
 PATTERN_VERSION = 2
 
@@ -48,7 +48,12 @@ _PATTERNS: tuple[tuple[str, str], ...] = (
     ("Call trace:", r"\] Call trace:"),  # arm64 spelling
     ("KASAN:", r"\bKASAN:"),
     ("UBSAN:", r"\bUBSAN:"),
-    ("lockdep", r"\blockdep splat\b|\bpossible recursive locking\b|\bpossible circular locking dependency\b|\bsuspicious RCU usage\b|\bpossible irq lock inversion dependency\b"),
+    (
+        "lockdep",
+        r"\blockdep splat\b|\bpossible recursive locking\b"
+        r"|\bpossible circular locking dependency\b|\bsuspicious RCU usage\b"
+        r"|\bpossible irq lock inversion dependency\b",
+    ),
     ("INFO: rcu stall", r"INFO: rcu_[a-z_]+(?: kthread)? .*stall"),
     # Hung tasks / hard / soft lockups.
     ("INFO: task hung", r"INFO: task .*:\d+ blocked for more than \d+ seconds"),
@@ -96,7 +101,10 @@ def selftest() -> int:
         ("BUG: KMSAN: uninit-value in luaV_execute+0x80", "BUG: KMSAN"),
         ("BUG: KFENCE: out-of-bounds read in lua_lvm_alloc+0x10/0x30", "BUG: KFENCE"),
         ("kernel BUG at security/lua/lsm.c:512!", "kernel BUG at"),
-        ("WARNING: CPU: 3 PID: 42 at security/lua/lsm.c:1145 lua_hook_dispatch+0x80/0x140", "WARNING: CPU:"),
+        (
+            "WARNING: CPU: 3 PID: 42 at security/lua/lsm.c:1145 lua_hook_dispatch+0x80/0x140",
+            "WARNING: CPU:",
+        ),
         ("WARNING: held lock freed!", "WARNING: held lock freed"),
         ("WARNING: kworker/u8:1/27 still has locks held!", "WARNING: locks still held"),
         ("Oops: 0010 [#1] PREEMPT SMP NOPTI", "Oops:"),
@@ -117,14 +125,17 @@ def selftest() -> int:
         ("list_add corruption. next->prev should be...", "list corruption"),
         ("ODEBUG: free active (active state 0) object: ffff888 ...", "ODEBUG"),
         ("refcount_t: addition on 0; use-after-free.", "refcount_t"),
-        ("BUG: workqueue lockup - pool cpus=4 node=0 flags=0x1 nice=0 stuck for 33s!", "workqueue lockup"),
+        (
+            "BUG: workqueue lockup - pool cpus=4 node=0 flags=0x1 nice=0 stuck for 33s!",
+            "workqueue lockup",
+        ),
         ("Kernel panic - not syncing: Attempted to kill init!", "Kernel panic"),
     ]
     negative_cases = [
         # Anchored: substring KASAN inside a benign log line MUST NOT match.
         "lua-lsm: registered KASAN-style xattr policy",
         "usbcore: registered new interface driver lockdep-test",
-        "audit: type=1400 audit(1234567.890:1): apparmor=\"DENIED\"",
+        'audit: type=1400 audit(1234567.890:1): apparmor="DENIED"',
         "systemd[1]: Starting bug-report-helper.service ...",
         "[    0.000000] Linux version 6.10.0+ (...) #1 SMP",
         "audit: BUG: a value is logged here",  # carefully not a real splat header
@@ -141,7 +152,8 @@ def selftest() -> int:
         matched = [cp.label for cp in PATTERNS if cp.regex.search(line)]
         if expected_label not in matched:
             failures.append(
-                f"positive case missed: line={line!r} expected={expected_label!r} matched={matched!r}"
+                f"positive case missed: line={line!r} "
+                f"expected={expected_label!r} matched={matched!r}"
             )
 
     # The carefully-constructed negative "audit: BUG: a value is logged here"
@@ -159,8 +171,10 @@ def selftest() -> int:
         for f in failures:
             print(f"  {f}", file=sys.stderr)
         return 1
-    print(f"classifier_patterns selftest OK ({len(positive_cases)} positive, "
-          f"{len(cleaned_negatives)} negative, PATTERN_VERSION={PATTERN_VERSION})")
+    print(
+        f"classifier_patterns selftest OK ({len(positive_cases)} positive, "
+        f"{len(cleaned_negatives)} negative, PATTERN_VERSION={PATTERN_VERSION})"
+    )
     return 0
 
 

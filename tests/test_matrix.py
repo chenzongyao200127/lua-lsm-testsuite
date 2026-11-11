@@ -8,23 +8,27 @@ from harness import matrix
 
 class ExpandTests(unittest.TestCase):
     def test_expand_cartesian_product(self):
-        plan = matrix.expand({
-            "name": "demo",
-            "axes": {
-                "kind": ["perf", "bughunt"],
-                "pool_max": [4, 16],
-            },
-        })
+        plan = matrix.expand(
+            {
+                "name": "demo",
+                "axes": {
+                    "kind": ["perf", "bughunt"],
+                    "pool_max": [4, 16],
+                },
+            }
+        )
         self.assertEqual(len(plan), 4)
         kinds = sorted({c.profile["kind"] for c in plan})
         self.assertEqual(kinds, ["bughunt", "perf"])
 
     def test_expand_with_exclude(self):
-        plan = matrix.expand({
-            "name": "demo",
-            "axes": {"kind": ["perf", "bughunt"], "pool_max": [4, 16]},
-            "exclude": [{"kind": "perf", "pool_max": 4}],
-        })
+        plan = matrix.expand(
+            {
+                "name": "demo",
+                "axes": {"kind": ["perf", "bughunt"], "pool_max": [4, 16]},
+                "exclude": [{"kind": "perf", "pool_max": 4}],
+            }
+        )
         self.assertEqual(len(plan), 3)
         for c in plan:
             self.assertFalse(c.profile["kind"] == "perf" and c.profile["pool_max"] == 4)
@@ -35,11 +39,13 @@ class ExpandTests(unittest.TestCase):
         self.assertEqual(plan[0].profile["kvm_required"], True)
 
     def test_expand_workload_default_propagates(self):
-        plan = matrix.expand({
-            "name": "demo",
-            "workload": "bench",
-            "axes": {"k": [1, 2]},
-        })
+        plan = matrix.expand(
+            {
+                "name": "demo",
+                "workload": "bench",
+                "axes": {"k": [1, 2]},
+            }
+        )
         self.assertTrue(all(c.workload == "bench" for c in plan))
 
     def test_smoke_matrix_has_32_cells(self):
@@ -48,7 +54,9 @@ class ExpandTests(unittest.TestCase):
         configs = Path(__file__).resolve().parent.parent / "configs"
         path = configs / "smoke.json"
         plan = matrix.plan_from_file(path)
-        self.assertEqual(len(plan.cells), 32, f"smoke matrix expanded to {len(plan.cells)} cells, expected 32")
+        self.assertEqual(
+            len(plan.cells), 32, f"smoke matrix expanded to {len(plan.cells)} cells, expected 32"
+        )
 
     def test_smoke_matrix_exposes_dec5_axes(self):
         """DEC-5: the default smoke sweep is policy x lvm_pool_max x
@@ -76,10 +84,8 @@ class ExpandTests(unittest.TestCase):
         plan = matrix.plan_from_file(configs / "perf.yaml")
         self.assertGreater(len(plan.cells), 0, "perf matrix expanded to zero cells")
         for c in plan.cells:
-            self.assertIn("policy", c.profile,
-                          f"perf cell {c.cell_id} is missing a `policy` knob")
-            self.assertTrue(c.profile["policy"],
-                            f"perf cell {c.cell_id} has empty policy")
+            self.assertIn("policy", c.profile, f"perf cell {c.cell_id} is missing a `policy` knob")
+            self.assertTrue(c.profile["policy"], f"perf cell {c.cell_id} has empty policy")
 
     def test_smoke_matrix_yaml_and_json_agree(self):
         """Both shipped smoke configs must expand to the same 32 cell ids so
@@ -96,11 +102,14 @@ class ExpandTests(unittest.TestCase):
 
 class ExecutorTests(unittest.TestCase):
     def test_run_matrix_aggregates_totals_and_writes_json(self):
-        plan = matrix.MatrixPlan(name="demo", cells=[
-            matrix.CellSpec(cell_id="c1", profile={"k": 1}, workload="smoke"),
-            matrix.CellSpec(cell_id="c2", profile={"k": 2}, workload="smoke"),
-            matrix.CellSpec(cell_id="c3", profile={"k": 3}, workload="smoke"),
-        ])
+        plan = matrix.MatrixPlan(
+            name="demo",
+            cells=[
+                matrix.CellSpec(cell_id="c1", profile={"k": 1}, workload="smoke"),
+                matrix.CellSpec(cell_id="c2", profile={"k": 2}, workload="smoke"),
+                matrix.CellSpec(cell_id="c3", profile={"k": 3}, workload="smoke"),
+            ],
+        )
 
         verdicts = {"c1": "pass", "c2": "kernel-bug", "c3": "skip:no-kvm"}
         seen_ports: list[int] = []

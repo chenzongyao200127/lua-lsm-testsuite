@@ -61,11 +61,14 @@ class JUnitEmitTests(unittest.TestCase):
         self.assertEqual(fail_el.attrib["type"], "no-verdict")
 
     def test_cases_sorted_by_cell_id(self):
-        matrix = {"name": "x", "cells": [
-            {"cell_id": "z", "verdict": "pass"},
-            {"cell_id": "a", "verdict": "pass"},
-            {"cell_id": "m", "verdict": "pass"},
-        ]}
+        matrix = {
+            "name": "x",
+            "cells": [
+                {"cell_id": "z", "verdict": "pass"},
+                {"cell_id": "a", "verdict": "pass"},
+                {"cell_id": "m", "verdict": "pass"},
+            ],
+        }
         xml = junit.emit_junit(matrix)
         root = ET.fromstring(xml.split("?>", 1)[1])
         names = [c.attrib["name"] for c in root.findall("testsuite/testcase")]
@@ -80,9 +83,14 @@ class JUnitEmitTests(unittest.TestCase):
         self.assertEqual(len(root.findall("testsuite/testcase")), 0)
 
     def test_xml_has_declaration_and_is_well_formed(self):
-        xml = junit.emit_junit({"name": "x", "cells": [
-            {"cell_id": "a", "verdict": "pass"},
-        ]})
+        xml = junit.emit_junit(
+            {
+                "name": "x",
+                "cells": [
+                    {"cell_id": "a", "verdict": "pass"},
+                ],
+            }
+        )
         self.assertTrue(xml.startswith("<?xml"))
         # Must parse without raising.
         ET.fromstring(xml.split("?>", 1)[1])
@@ -94,18 +102,24 @@ class JUnitCliWritesFileTests(unittest.TestCase):
 
     def test_matrix_cli_writes_junit_file(self):
         import json
-        from io import StringIO
         from contextlib import redirect_stdout
+        from io import StringIO
         from pathlib import Path
         from tempfile import TemporaryDirectory
         from unittest.mock import patch
-        from harness import __main__ as cli, cell_runner, matrix as matrix_mod
+
+        from harness import __main__ as cli
+        from harness import cell_runner
+        from harness import matrix as matrix_mod
 
         def _stub(inputs, host=None):
             inputs.artifact_dir.mkdir(parents=True, exist_ok=True)
             res = {
-                "schema_version": 1, "cell_id": inputs.cell_id,
-                "verdict": "pass", "started_at": None, "finished_at": None,
+                "schema_version": 1,
+                "cell_id": inputs.cell_id,
+                "verdict": "pass",
+                "started_at": None,
+                "finished_at": None,
             }
             (inputs.artifact_dir / "result.json").write_text(json.dumps(res))
             return res
@@ -113,28 +127,44 @@ class JUnitCliWritesFileTests(unittest.TestCase):
         with TemporaryDirectory() as td:
             tdp = Path(td)
             cfg = tdp / "tiny.json"
-            cfg.write_text(json.dumps({
-                "name": "tiny", "axes": {"x": [1, 2]},
-                "defaults": {"kvm_required": False},
-            }))
+            cfg.write_text(
+                json.dumps(
+                    {
+                        "name": "tiny",
+                        "axes": {"x": [1, 2]},
+                        "defaults": {"kvm_required": False},
+                    }
+                )
+            )
             junit_path = tdp / "out" / "junit.xml"
             buf = StringIO()
-            with patch.object(cell_runner, "run_cell", side_effect=_stub), \
-                 patch.object(matrix_mod, "assert_share_dir", lambda *_args, **_kw: None), \
-                 patch.object(cli, "_enforce_supported_host", lambda: None), \
-                 redirect_stdout(buf):
-                rc = cli.main([
-                    "matrix",
-                    "--config", str(cfg),
-                    "--ssh-key", "/dev/null",
-                    "--launcher", "/nonexistent/run.sh",
-                    "--runs-root", str(tdp / "runs"),
-                    "--port-base", "21000",
-                    "--junit", str(junit_path),
-                ])
+            with (
+                patch.object(cell_runner, "run_cell", side_effect=_stub),
+                patch.object(matrix_mod, "assert_share_dir", lambda *_args, **_kw: None),
+                patch.object(cli, "_enforce_supported_host", lambda: None),
+                redirect_stdout(buf),
+            ):
+                rc = cli.main(
+                    [
+                        "matrix",
+                        "--config",
+                        str(cfg),
+                        "--ssh-key",
+                        "/dev/null",
+                        "--launcher",
+                        "/nonexistent/run.sh",
+                        "--runs-root",
+                        str(tdp / "runs"),
+                        "--port-base",
+                        "21000",
+                        "--junit",
+                        str(junit_path),
+                    ]
+                )
             self.assertEqual(rc, 0)
-            self.assertTrue(junit_path.exists(),
-                            "matrix --junit must create the file (parent mkdir)")
+            self.assertTrue(
+                junit_path.exists(), "matrix --junit must create the file (parent mkdir)"
+            )
             xml = junit_path.read_text()
             root = ET.fromstring(xml.split("?>", 1)[1])
             self.assertEqual(root.attrib["tests"], "2")

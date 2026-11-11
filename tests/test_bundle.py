@@ -18,8 +18,9 @@ def _make_artifact(td: Path, cell_id: str) -> Path:
     return art
 
 
-def _sources(art: Path, cell_id: str, td: Path,
-             commands=None, policies=None) -> bundle.BundleSources:
+def _sources(
+    art: Path, cell_id: str, td: Path, commands=None, policies=None
+) -> bundle.BundleSources:
     return bundle.BundleSources(
         cell_id=cell_id,
         artifact_dir=art,
@@ -45,17 +46,33 @@ class BundleTests(unittest.TestCase):
             tdp = Path(td)
             art = _make_artifact(tdp, "cell1")
             store = bundle.BundleStore()
-            sources = _sources(art, "cell1", tdp,
-                               commands=["echo hello", "ls /sys/kernel/security/lua"],
-                               policies=[])
-            bdir = bundle.write_bundle(store, sources, signature_sha1="a" * 40, signature_kind="primary")
+            sources = _sources(
+                art,
+                "cell1",
+                tdp,
+                commands=["echo hello", "ls /sys/kernel/security/lua"],
+                policies=[],
+            )
+            bdir = bundle.write_bundle(
+                store, sources, signature_sha1="a" * 40, signature_kind="primary"
+            )
 
             # Bundle now lives inside the cell's artifact_dir as `bundle/`.
             self.assertEqual(bdir, art / "bundle")
 
-            for name in ("kernel.sha", ".config", "config.diff", "cmdline",
-                         "commands.sh", "rootfs.sha256", "serial.log",
-                         "dmesg.txt", "decoded.txt", "signature", "metadata.json"):
+            for name in (
+                "kernel.sha",
+                ".config",
+                "config.diff",
+                "cmdline",
+                "commands.sh",
+                "rootfs.sha256",
+                "serial.log",
+                "dmesg.txt",
+                "decoded.txt",
+                "signature",
+                "metadata.json",
+            ):
                 self.assertTrue((bdir / name).exists(), f"missing: {name}")
             # policies is a directory; the reproducer payload lists it as
             # one entry even when no policies were registered.
@@ -84,8 +101,12 @@ class BundleTests(unittest.TestCase):
             store = bundle.BundleStore()
 
             sig = "b" * 40
-            b1 = bundle.write_bundle(store, _sources(art1, "cell1", tdp), signature_sha1=sig, signature_kind="primary")
-            b2 = bundle.write_bundle(store, _sources(art2, "cell2", tdp), signature_sha1=sig, signature_kind="primary")
+            b1 = bundle.write_bundle(
+                store, _sources(art1, "cell1", tdp), signature_sha1=sig, signature_kind="primary"
+            )
+            b2 = bundle.write_bundle(
+                store, _sources(art2, "cell2", tdp), signature_sha1=sig, signature_kind="primary"
+            )
 
             self.assertNotEqual(b1, b2)
             # First bundle has full payload.
@@ -112,8 +133,12 @@ class BundleTests(unittest.TestCase):
             tdp = Path(td)
             art = _make_artifact(tdp, "cell1")
             store = bundle.BundleStore()
-            bdir = bundle.write_bundle(store, _sources(art, "cell1", tdp),
-                                       signature_sha1="c" * 40, signature_kind="fallback")
+            bdir = bundle.write_bundle(
+                store,
+                _sources(art, "cell1", tdp),
+                signature_sha1="c" * 40,
+                signature_kind="fallback",
+            )
             meta = json.loads((bdir / "metadata.json").read_text())
             self.assertEqual(meta["signature_kind"], "fallback")
             sig_lines = (bdir / "signature").read_text().splitlines()
@@ -125,8 +150,12 @@ class BundleTests(unittest.TestCase):
             store = bundle.BundleStore()
             art = _make_artifact(tdp, "cell1")
             with self.assertRaises(ValueError):
-                bundle.write_bundle(store, _sources(art, "cell1", tdp),
-                                    signature_sha1="d" * 40, signature_kind="bogus")
+                bundle.write_bundle(
+                    store,
+                    _sources(art, "cell1", tdp),
+                    signature_sha1="d" * 40,
+                    signature_kind="bogus",
+                )
 
     def test_policies_dir_populated_when_provided(self):
         with TemporaryDirectory() as td:
@@ -137,9 +166,12 @@ class BundleTests(unittest.TestCase):
             (pol_src / "hello.lua").write_text("-- hello policy\n")
             (pol_src / "deny.lua").write_text("-- deny policy\n")
             store = bundle.BundleStore()
-            sources = _sources(art, "cell1", tdp,
-                               policies=[pol_src / "hello.lua", pol_src / "deny.lua"])
-            bdir = bundle.write_bundle(store, sources, signature_sha1="e" * 40, signature_kind="primary")
+            sources = _sources(
+                art, "cell1", tdp, policies=[pol_src / "hello.lua", pol_src / "deny.lua"]
+            )
+            bdir = bundle.write_bundle(
+                store, sources, signature_sha1="e" * 40, signature_kind="primary"
+            )
             self.assertTrue((bdir / "policies" / "hello.lua").exists())
             self.assertTrue((bdir / "policies" / "deny.lua").exists())
 

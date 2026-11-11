@@ -15,8 +15,8 @@ shaped like {"verdict": "skip:...", "reason": <str>, "remediation": <str>}.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Mapping
 
 from . import ssh
 
@@ -54,7 +54,9 @@ def image_warm_check(image_path: Path | None, warm_marker: Path | None) -> Mappi
     return None
 
 
-def host_share_check(target: ssh.SshTarget, mount_point: str = "/mnt/host") -> Mapping[str, str] | None:
+def host_share_check(
+    target: ssh.SshTarget, mount_point: str = "/mnt/host"
+) -> Mapping[str, str] | None:
     """SKIP if the 9p host_share isn't mounted in the guest.
 
     Workloads that read host_share/{lua-lsm-tools,unixbench} would otherwise

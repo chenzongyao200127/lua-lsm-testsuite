@@ -20,8 +20,21 @@ from tempfile import TemporaryDirectory
 from unittest.mock import MagicMock, patch
 
 from harness import (
-    __main__ as cli, bundle, cell_runner, hostenv, matrix, preflight, qemu,
-    run_registry, schemas, ssh,
+    __main__ as cli,
+)
+from harness import (
+    bisect as bisect_mod,
+)
+from harness import (
+    bundle,
+    cell_runner,
+    hostenv,
+    matrix,
+    preflight,
+    qemu,
+    run_registry,
+    schemas,
+    ssh,
 )
 
 
@@ -31,8 +44,10 @@ def _fake_handle(pid: int = 4242) -> qemu.QemuHandle:
     proc.poll.return_value = 0
     proc.returncode = 0
     return qemu.QemuHandle(
-        proc=proc, serial_log_path=Path("/tmp/serial.log"),
-        pgid=pid, started_at=0.0,
+        proc=proc,
+        serial_log_path=Path("/tmp/serial.log"),
+        pgid=pid,
+        started_at=0.0,
     )
 
 
@@ -42,8 +57,11 @@ def _fake_ssh_ok(target, cmd, timeout_s=120.0):
 
 class _PatchHostEnv:
     def __enter__(self):
-        self._patch = patch.object(hostenv, "detect", return_value=hostenv.HostEnv(
-            system="Linux", release="6.10.0", has_kvm=True))
+        self._patch = patch.object(
+            hostenv,
+            "detect",
+            return_value=hostenv.HostEnv(system="Linux", release="6.10.0", has_kvm=True),
+        )
         self._patch.start()
         return self
 
@@ -55,15 +73,18 @@ class _PatchHostEnv:
 # qemu.spawn OSError wrap
 # ---------------------------------------------------------------------------
 
+
 class QemuSpawnOSErrorTests(unittest.TestCase):
     def test_popen_oserror_becomes_qemu_launch_error(self):
         with TemporaryDirectory() as td:
             launcher = Path(td) / "launcher.sh"
             launcher.write_text("#!/bin/sh\nexit 0\n")
             launcher.chmod(0o755)
-            with patch("subprocess.Popen", side_effect=OSError("permission denied")):
-                with self.assertRaises(qemu.QemuLaunchError) as cm:
-                    qemu.spawn(launcher, {}, Path(td) / "serial.log")
+            with (
+                patch("subprocess.Popen", side_effect=OSError("permission denied")),
+                self.assertRaises(qemu.QemuLaunchError) as cm,
+            ):
+                qemu.spawn(launcher, {}, Path(td) / "serial.log")
             self.assertIn("permission denied", str(cm.exception))
 
     def test_run_cell_finalises_result_on_spawn_oserror(self):
@@ -80,13 +101,15 @@ class QemuSpawnOSErrorTests(unittest.TestCase):
                 workload_name="noop",
                 launcher=launcher,
                 artifact_dir=art,
-                ssh_target=ssh.SshTarget(host="127.0.0.1", port=10023, user="root",
-                                         key_path=Path("/dev/null")),
+                ssh_target=ssh.SshTarget(
+                    host="127.0.0.1", port=10023, user="root", key_path=Path("/dev/null")
+                ),
                 kvm_required=False,
             )
             with patch("subprocess.Popen", side_effect=OSError("bash gone")):
                 r = cell_runner.run_cell(
-                    inputs, host=hostenv.HostEnv(system="Linux", release="6.10", has_kvm=True),
+                    inputs,
+                    host=hostenv.HostEnv(system="Linux", release="6.10", has_kvm=True),
                 )
             self.assertEqual(r["verdict"], "harness-error")
             self.assertTrue((art / "result.json").exists())
@@ -96,30 +119,40 @@ class QemuSpawnOSErrorTests(unittest.TestCase):
 # AC-7: --detach-vm
 # ---------------------------------------------------------------------------
 
+
 class CliDetachVmTests(unittest.TestCase):
     def test_detach_vm_prints_pid_and_port_skips_workload_and_result_json(self):
         with TemporaryDirectory() as td:
             tdp = Path(td)
             args = [
                 "run",
-                "--workload", "smoke",
-                "--kind", "bughunt",
+                "--workload",
+                "smoke",
+                "--kind",
+                "bughunt",
                 "--no-kvm",
-                "--ssh-key", "/dev/null",
-                "--launcher", "/nonexistent/launcher.sh",
-                "--runs-root", str(tdp / "runs"),
-                "--boot-timeout", "1.0",
-                "--ssh-port", "10099",
+                "--ssh-key",
+                "/dev/null",
+                "--launcher",
+                "/nonexistent/launcher.sh",
+                "--runs-root",
+                str(tdp / "runs"),
+                "--boot-timeout",
+                "1.0",
+                "--ssh-port",
+                "10099",
                 "--detach-vm",
             ]
             workload_called = MagicMock()
-            with _PatchHostEnv(), \
-                 patch.object(qemu, "spawn", return_value=_fake_handle(pid=7777)) as spawn_mock, \
-                 patch.object(qemu, "stop", return_value=0) as stop_mock, \
-                 patch.object(ssh, "wait_for_ssh", return_value=True), \
-                 patch.object(ssh, "run", side_effect=_fake_ssh_ok), \
-                 patch("harness.workloads.by_name", return_value=workload_called), \
-                 patch("sys.stdout") as stdout_mock:
+            with (
+                _PatchHostEnv(),
+                patch.object(qemu, "spawn", return_value=_fake_handle(pid=7777)) as spawn_mock,
+                patch.object(qemu, "stop", return_value=0) as stop_mock,
+                patch.object(ssh, "wait_for_ssh", return_value=True),
+                patch.object(ssh, "run", side_effect=_fake_ssh_ok),
+                patch("harness.workloads.by_name", return_value=workload_called),
+                patch("sys.stdout") as stdout_mock,
+            ):
                 rc = cli.main(args)
 
             self.assertEqual(rc, cli.KSFT_PASS)
@@ -133,12 +166,12 @@ class CliDetachVmTests(unittest.TestCase):
             self.assertTrue((cell_dir / "cell.json").exists())
             self.assertTrue((cell_dir / "extra-cmdline.txt").exists())
             self.assertTrue((cell_dir / "qemu-cmdline.txt").exists())
-            self.assertFalse((cell_dir / "result.json").exists(),
-                             "--detach-vm must not finalize result.json")
+            self.assertFalse(
+                (cell_dir / "result.json").exists(), "--detach-vm must not finalize result.json"
+            )
 
             stdout_writes = "".join(
-                str(c.args[0]) if c.args else ""
-                for c in stdout_mock.write.call_args_list
+                str(c.args[0]) if c.args else "" for c in stdout_mock.write.call_args_list
             )
             self.assertIn("pid=7777", stdout_writes)
             self.assertIn("ssh_port=10099", stdout_writes)
@@ -147,6 +180,7 @@ class CliDetachVmTests(unittest.TestCase):
 # ---------------------------------------------------------------------------
 # AC-7: --interactive threads through to qemu.spawn
 # ---------------------------------------------------------------------------
+
 
 class CliInteractiveTests(unittest.TestCase):
     def test_interactive_passes_interactive_true_to_spawn_and_writes_result(self):
@@ -162,33 +196,44 @@ class CliInteractiveTests(unittest.TestCase):
 
             args = [
                 "run",
-                "--workload", "smoke",
-                "--kind", "bughunt",
+                "--workload",
+                "smoke",
+                "--kind",
+                "bughunt",
                 "--no-kvm",
-                "--ssh-key", "/dev/null",
-                "--launcher", "/nonexistent/launcher.sh",
-                "--runs-root", str(tdp / "runs"),
-                "--boot-timeout", "1.0",
+                "--ssh-key",
+                "/dev/null",
+                "--launcher",
+                "/nonexistent/launcher.sh",
+                "--runs-root",
+                str(tdp / "runs"),
+                "--boot-timeout",
+                "1.0",
                 "--interactive",
             ]
-            with _PatchHostEnv(), \
-                 patch.object(qemu, "spawn", side_effect=_spawn_capturing), \
-                 patch.object(qemu, "stop", return_value=0), \
-                 patch.object(ssh, "wait_for_ssh", return_value=True), \
-                 patch.object(ssh, "run", side_effect=_fake_ssh_ok), \
-                 patch.object(ssh, "fetch_text", return_value=None):
+            with (
+                _PatchHostEnv(),
+                patch.object(qemu, "spawn", side_effect=_spawn_capturing),
+                patch.object(qemu, "stop", return_value=0),
+                patch.object(ssh, "wait_for_ssh", return_value=True),
+                patch.object(ssh, "run", side_effect=_fake_ssh_ok),
+                patch.object(ssh, "fetch_text", return_value=None),
+            ):
                 rc = cli.main(args)
             self.assertEqual(rc, cli.KSFT_PASS)
             self.assertEqual(captured_kwargs.get("interactive"), True)
             cell_dirs = list((tdp / "runs").glob("*"))
             self.assertEqual(len(cell_dirs), 1)
-            self.assertTrue((cell_dirs[0] / "result.json").exists(),
-                            "--interactive must still write result.json at teardown")
+            self.assertTrue(
+                (cell_dirs[0] / "result.json").exists(),
+                "--interactive must still write result.json at teardown",
+            )
 
 
 # ---------------------------------------------------------------------------
 # workload-fail verdict
 # ---------------------------------------------------------------------------
+
 
 class WorkloadFailVerdictTests(unittest.TestCase):
     def _make_ctx(self, art: Path, workload_name: str):
@@ -199,13 +244,16 @@ class WorkloadFailVerdictTests(unittest.TestCase):
             workload_name=workload_name,
             launcher=Path("/nonexistent/run.sh"),
             artifact_dir=art,
-            ssh_target=ssh.SshTarget(host="127.0.0.1", port=10023, user="root",
-                                     key_path=Path("/dev/null")),
+            ssh_target=ssh.SshTarget(
+                host="127.0.0.1", port=10023, user="root", key_path=Path("/dev/null")
+            ),
             kvm_required=False,
         )
         ctx = cell_runner.CellContext(
-            cell_id=inputs.cell_id, artifact_dir=art,
-            target=inputs.ssh_target, profile=inputs.profile,
+            cell_id=inputs.cell_id,
+            artifact_dir=art,
+            target=inputs.ssh_target,
+            profile=inputs.profile,
         )
         return inputs, ctx
 
@@ -276,6 +324,7 @@ class WorkloadFailVerdictTests(unittest.TestCase):
 # AC-6.1: runtime bundle generation
 # ---------------------------------------------------------------------------
 
+
 class RuntimeBundleTests(unittest.TestCase):
     def _kasan_inputs(self, art: Path, store: bundle.BundleStore, cell_id: str = "kasan_cell"):
         inputs = cell_runner.CellInputs(
@@ -285,8 +334,9 @@ class RuntimeBundleTests(unittest.TestCase):
             workload_name="noop",
             launcher=Path("/nonexistent/run.sh"),
             artifact_dir=art,
-            ssh_target=ssh.SshTarget(host="127.0.0.1", port=10023, user="root",
-                                     key_path=Path("/dev/null")),
+            ssh_target=ssh.SshTarget(
+                host="127.0.0.1", port=10023, user="root", key_path=Path("/dev/null")
+            ),
             kvm_required=False,
             bundle_store=store,
             kernel_tree=art / "fake_tree",
@@ -296,8 +346,10 @@ class RuntimeBundleTests(unittest.TestCase):
             policy_paths=(),
         )
         ctx = cell_runner.CellContext(
-            cell_id=inputs.cell_id, artifact_dir=art,
-            target=inputs.ssh_target, profile=inputs.profile,
+            cell_id=inputs.cell_id,
+            artifact_dir=art,
+            target=inputs.ssh_target,
+            profile=inputs.profile,
         )
         return inputs, ctx
 
@@ -305,7 +357,9 @@ class RuntimeBundleTests(unittest.TestCase):
         body = []
         for i in range(lines_before):
             body.append(f"[    0.{i:03d}] padding line {i}")
-        body.append("[    1.000] ==================================================================")
+        body.append(
+            "[    1.000] =================================================================="
+        )
         body.append("[    1.001] BUG: KASAN: use-after-free in lua_lvm_alloc+0x10/0x30")
         body.append("[    1.002] Read of size 8 at addr ffff8881020100c0 by task lua/1234")
         for i in range(lines_after):
@@ -332,16 +386,25 @@ class RuntimeBundleTests(unittest.TestCase):
             # Bundles now live inside the cell's own artifact directory.
             self.assertEqual(bd, art / "bundle")
             self.assertTrue(bd.exists())
-            for fname in ("kernel.sha", ".config", "config.diff", "cmdline",
-                          "commands.sh", "rootfs.sha256", "serial.log",
-                          "dmesg.txt", "decoded.txt", "signature"):
-                self.assertTrue((bd / fname).exists(),
-                                f"bundle missing {fname}")
+            for fname in (
+                "kernel.sha",
+                ".config",
+                "config.diff",
+                "cmdline",
+                "commands.sh",
+                "rootfs.sha256",
+                "serial.log",
+                "dmesg.txt",
+                "decoded.txt",
+                "signature",
+            ):
+                self.assertTrue((bd / fname).exists(), f"bundle missing {fname}")
             self.assertTrue((bd / "policies").is_dir())
             slice_text = (bd / "dmesg.txt").read_text()
             slice_lines = slice_text.splitlines()
-            self.assertLessEqual(len(slice_lines), 50,
-                                 "dmesg.txt must be at most 50 lines centered on first hit")
+            self.assertLessEqual(
+                len(slice_lines), 50, "dmesg.txt must be at most 50 lines centered on first hit"
+            )
             self.assertTrue(
                 any("KASAN" in ln for ln in slice_lines),
                 "dmesg.txt slice must contain the first KASAN hit",
@@ -390,15 +453,11 @@ class RuntimeBundleTests(unittest.TestCase):
             serial_lines = [f"[    0.{i:03d}] boot line {i}" for i in range(200)]
             (art / "serial.log").write_text("\n".join(serial_lines) + "\n")
             dmesg_lines = [f"[    1.{i:03d}] post-boot {i}" for i in range(60)]
-            dmesg_lines.append(
-                "[    2.000] BUG: KASAN: use-after-free in lua_lvm_alloc+0x10/0x30"
-            )
+            dmesg_lines.append("[    2.000] BUG: KASAN: use-after-free in lua_lvm_alloc+0x10/0x30")
             dmesg_lines.append(
                 "[    2.001] Read of size 8 at addr ffff8881020100c0 by task lua/1234"
             )
-            dmesg_lines.extend(
-                f"[    3.{i:03d}] trail {i}" for i in range(60)
-            )
+            dmesg_lines.extend(f"[    3.{i:03d}] trail {i}" for i in range(60))
             (art / "dmesg.log").write_text("\n".join(dmesg_lines) + "\n")
             store = bundle.BundleStore()
             inputs, ctx = self._kasan_inputs(art, store)
@@ -439,8 +498,9 @@ class RuntimeBundleTests(unittest.TestCase):
                 workload_name="noop",
                 launcher=Path("/nonexistent/run.sh"),
                 artifact_dir=art,
-                ssh_target=ssh.SshTarget(host="127.0.0.1", port=10023, user="root",
-                                         key_path=Path("/dev/null")),
+                ssh_target=ssh.SshTarget(
+                    host="127.0.0.1", port=10023, user="root", key_path=Path("/dev/null")
+                ),
                 kvm_required=False,
                 bundle_store=store,
                 kernel_tree=art / "fake_tree",
@@ -450,8 +510,10 @@ class RuntimeBundleTests(unittest.TestCase):
                 policy_paths=(hello,),
             )
             ctx = cell_runner.CellContext(
-                cell_id=inputs.cell_id, artifact_dir=art,
-                target=inputs.ssh_target, profile=inputs.profile,
+                cell_id=inputs.cell_id,
+                artifact_dir=art,
+                target=inputs.ssh_target,
+                profile=inputs.profile,
             )
             ctx.commands.append("echo replay-step-1")
             ctx.commands.append("cat /sys/kernel/security/lua/lvm_pool_max")
@@ -477,6 +539,7 @@ class RuntimeBundleTests(unittest.TestCase):
 # AC-4: SIGINT QEMU reap
 # ---------------------------------------------------------------------------
 
+
 class SigintReapTests(unittest.TestCase):
     def test_sigint_stops_registered_handle_within_grace(self):
         # Mock the qemu.stop path with an instrumented spy so we can verify
@@ -495,31 +558,41 @@ class SigintReapTests(unittest.TestCase):
                 # We send SIGINT into our own process, which the matrix executor
                 # has armed with _on_sigint, then assert the registry reaped.
                 import os
+
                 os.kill(os.getpid(), signal.SIGINT)
                 time.sleep(0.05)
                 stopped_in_handler.append("cell-a" not in registry.active_cells())
                 art.mkdir(parents=True, exist_ok=True)
                 return schemas.empty_result(cell.cell_id)
 
-            plan = matrix.MatrixPlan(name="m", cells=[
-                matrix.CellSpec(cell_id="cell-a",
-                                profile={"workload": "smoke"}, workload="smoke"),
-            ])
+            plan = matrix.MatrixPlan(
+                name="m",
+                cells=[
+                    matrix.CellSpec(
+                        cell_id="cell-a", profile={"workload": "smoke"}, workload="smoke"
+                    ),
+                ],
+            )
             opts = matrix.ExecutorOpts(
-                parallel=1, runs_root=tdp / "runs",
-                matrix_path=None, port_base=20000,
+                parallel=1,
+                runs_root=tdp / "runs",
+                matrix_path=None,
+                port_base=20000,
                 registry=registry,
             )
             with patch.object(qemu, "stop", return_value=0) as stop_mock:
                 matrix.run_matrix(plan, opts, _slow_runner)
             stop_mock.assert_called()
-            self.assertTrue(stopped_in_handler and stopped_in_handler[0],
-                            "registry.stop_all should have removed cell-a")
+            self.assertTrue(
+                stopped_in_handler and stopped_in_handler[0],
+                "registry.stop_all should have removed cell-a",
+            )
 
 
 # ---------------------------------------------------------------------------
 # AC-2.3: kconfig profile validation at planning boundary
 # ---------------------------------------------------------------------------
+
 
 class KconfigValidationTests(unittest.TestCase):
     def test_assert_kconfig_profile_accepts_standard_and_full(self):
@@ -536,23 +609,29 @@ class KconfigValidationTests(unittest.TestCase):
             tdp = Path(td)
             args = [
                 "run",
-                "--workload", "smoke",
+                "--workload",
+                "smoke",
                 "--no-kvm",
-                "--ssh-key", "/dev/null",
-                "--runs-root", str(tdp / "runs"),
-                "--kconfig-profile", "bogus",
+                "--ssh-key",
+                "/dev/null",
+                "--runs-root",
+                str(tdp / "runs"),
+                "--kconfig-profile",
+                "bogus",
             ]
-            with _PatchHostEnv():
+            with _PatchHostEnv(), self.assertRaises(SystemExit):
                 # argparse rejects choices outside its allowed list.
-                with self.assertRaises(SystemExit):
-                    cli.main(args)
-            self.assertFalse((tdp / "runs").exists(),
-                             "no artifact dir should be created on invalid kconfig profile")
+                cli.main(args)
+            self.assertFalse(
+                (tdp / "runs").exists(),
+                "no artifact dir should be created on invalid kconfig profile",
+            )
 
 
 # ---------------------------------------------------------------------------
 # AC-3.1: LKDTM rc=77 short-circuits BEFORE the no-dmesg early return
 # ---------------------------------------------------------------------------
+
 
 class LkdtmShortCircuitOrderingTests(unittest.TestCase):
     def test_lkdtm_rc77_with_zero_byte_logs_yields_skip_not_no_dmesg(self):
@@ -567,13 +646,16 @@ class LkdtmShortCircuitOrderingTests(unittest.TestCase):
                 workload_name="lkdtm",
                 launcher=Path("/nonexistent/run.sh"),
                 artifact_dir=art,
-                ssh_target=ssh.SshTarget(host="127.0.0.1", port=10023, user="root",
-                                         key_path=Path("/dev/null")),
+                ssh_target=ssh.SshTarget(
+                    host="127.0.0.1", port=10023, user="root", key_path=Path("/dev/null")
+                ),
                 kvm_required=False,
             )
             ctx = cell_runner.CellContext(
-                cell_id=inputs.cell_id, artifact_dir=art,
-                target=inputs.ssh_target, profile=inputs.profile,
+                cell_id=inputs.cell_id,
+                artifact_dir=art,
+                target=inputs.ssh_target,
+                profile=inputs.profile,
             )
             r = schemas.empty_result("lkdtm_cell")
             out = cell_runner._classify_and_finalize(r, art, inputs, ctx, 77)
@@ -585,6 +667,7 @@ class LkdtmShortCircuitOrderingTests(unittest.TestCase):
 # --build-kernel through distinct expanded profiles
 # ---------------------------------------------------------------------------
 
+
 class MatrixKconfigValidationTests(unittest.TestCase):
     def _write_matrix(self, td: Path, doc_text: str) -> Path:
         cfg = td / "matrix.json"
@@ -594,24 +677,35 @@ class MatrixKconfigValidationTests(unittest.TestCase):
     def test_matrix_with_invalid_profile_in_axis_fails_before_runs_dir(self):
         with TemporaryDirectory() as td:
             tdp = Path(td)
-            cfg = self._write_matrix(tdp, json.dumps({
-                "name": "m",
-                "defaults": {"workload": "smoke", "kind": "bughunt"},
-                "axes": {"kconfig_profile": ["standard", "bogus"]},
-            }))
+            cfg = self._write_matrix(
+                tdp,
+                json.dumps(
+                    {
+                        "name": "m",
+                        "defaults": {"workload": "smoke", "kind": "bughunt"},
+                        "axes": {"kconfig_profile": ["standard", "bogus"]},
+                    }
+                ),
+            )
             args = [
                 "matrix",
-                "--config", str(cfg),
-                "--runs-root", str(tdp / "runs"),
-                "--ssh-key", "/dev/null",
-                "--launcher", "/nonexistent/run.sh",
+                "--config",
+                str(cfg),
+                "--runs-root",
+                str(tdp / "runs"),
+                "--ssh-key",
+                "/dev/null",
+                "--launcher",
+                "/nonexistent/run.sh",
             ]
             with _PatchHostEnv():
                 rc = cli.main(args)
-            self.assertEqual(rc, cli.KSFT_FAIL,
-                             "matrix with bogus kconfig profile must fail at planning")
-            self.assertFalse((tdp / "runs").exists(),
-                             "runs dir must not be created when a profile is invalid")
+            self.assertEqual(
+                rc, cli.KSFT_FAIL, "matrix with bogus kconfig profile must fail at planning"
+            )
+            self.assertFalse(
+                (tdp / "runs").exists(), "runs dir must not be created when a profile is invalid"
+            )
 
     def test_build_kernel_invoked_once_per_distinct_profile(self):
         with TemporaryDirectory() as td:
@@ -619,11 +713,16 @@ class MatrixKconfigValidationTests(unittest.TestCase):
             # Two cells, two distinct profiles: helper must be called exactly
             # twice with `--kernel <tree> --profile <X>` matching the real
             # enable-debug-kconfig.sh contract (it requires --kernel <dir>).
-            cfg = self._write_matrix(tdp, json.dumps({
-                "name": "m",
-                "defaults": {"workload": "smoke", "kind": "bughunt"},
-                "axes": {"kconfig_profile": ["standard", "full"]},
-            }))
+            cfg = self._write_matrix(
+                tdp,
+                json.dumps(
+                    {
+                        "name": "m",
+                        "defaults": {"workload": "smoke", "kind": "bughunt"},
+                        "axes": {"kconfig_profile": ["standard", "full"]},
+                    }
+                ),
+            )
             debug_kernel = tdp / "tools"
             debug_kernel.mkdir()
             helper = debug_kernel / "enable-debug-kconfig.sh"
@@ -634,14 +733,21 @@ class MatrixKconfigValidationTests(unittest.TestCase):
 
             args = [
                 "matrix",
-                "--config", str(cfg),
-                "--runs-root", str(tdp / "runs"),
-                "--ssh-key", "/dev/null",
-                "--launcher", "/nonexistent/run.sh",
-                "--debug-kernel", str(debug_kernel),
-                "--kernel-tree", str(kernel_tree),
+                "--config",
+                str(cfg),
+                "--runs-root",
+                str(tdp / "runs"),
+                "--ssh-key",
+                "/dev/null",
+                "--launcher",
+                "/nonexistent/run.sh",
+                "--debug-kernel",
+                str(debug_kernel),
+                "--kernel-tree",
+                str(kernel_tree),
                 "--build-kernel",
-                "--parallel", "1",
+                "--parallel",
+                "1",
                 # Workload mocks so we never actually try to boot.
             ]
 
@@ -651,28 +757,36 @@ class MatrixKconfigValidationTests(unittest.TestCase):
                 run_calls.append(list(cmd))
                 return subprocess.CompletedProcess(cmd, 0)
 
-            with _PatchHostEnv(), \
-                 patch.object(cli.subprocess, "run", side_effect=_fake_subprocess_run), \
-                 patch.object(qemu, "spawn", return_value=_fake_handle()), \
-                 patch.object(qemu, "stop", return_value=0), \
-                 patch.object(ssh, "wait_for_ssh", return_value=True), \
-                 patch.object(ssh, "run", side_effect=_fake_ssh_ok), \
-                 patch("harness.workloads.by_name",
-                       return_value=lambda t, c: cell_runner.WorkloadResult(name="smoke")):
+            with (
+                _PatchHostEnv(),
+                patch.object(cli.subprocess, "run", side_effect=_fake_subprocess_run),
+                patch.object(qemu, "spawn", return_value=_fake_handle()),
+                patch.object(qemu, "stop", return_value=0),
+                patch.object(ssh, "wait_for_ssh", return_value=True),
+                patch.object(ssh, "run", side_effect=_fake_ssh_ok),
+                patch(
+                    "harness.workloads.by_name",
+                    return_value=lambda t, c: cell_runner.WorkloadResult(name="smoke"),
+                ),
+            ):
                 cli.main(args)
 
             helper_calls = [c for c in run_calls if str(c[0]).endswith("enable-debug-kconfig.sh")]
-            self.assertEqual(len(helper_calls), 2,
-                             f"helper should be invoked once per distinct profile, got {helper_calls!r}")
+            self.assertEqual(
+                len(helper_calls),
+                2,
+                f"helper should be invoked once per distinct profile, got {helper_calls!r}",
+            )
             # Every helper invocation MUST carry --kernel <tree> AND --profile <X>
             for call in helper_calls:
-                self.assertIn("--kernel", call,
-                              f"helper call must include --kernel: {call!r}")
+                self.assertIn("--kernel", call, f"helper call must include --kernel: {call!r}")
                 kernel_idx = call.index("--kernel")
-                self.assertEqual(call[kernel_idx + 1], str(kernel_tree),
-                                 f"--kernel argument should be {kernel_tree}: {call!r}")
-                self.assertIn("--profile", call,
-                              f"helper call must include --profile: {call!r}")
+                self.assertEqual(
+                    call[kernel_idx + 1],
+                    str(kernel_tree),
+                    f"--kernel argument should be {kernel_tree}: {call!r}",
+                )
+                self.assertIn("--profile", call, f"helper call must include --profile: {call!r}")
             seen_profiles = sorted(c[c.index("--profile") + 1] for c in helper_calls)
             self.assertEqual(seen_profiles, ["full", "standard"])
 
@@ -681,12 +795,20 @@ class MatrixKconfigValidationTests(unittest.TestCase):
         # helper must still run only once -- and still carry --kernel.
         with TemporaryDirectory() as td:
             tdp = Path(td)
-            cfg = self._write_matrix(tdp, json.dumps({
-                "name": "m",
-                "defaults": {"workload": "smoke", "kind": "bughunt",
-                             "kconfig_profile": "standard"},
-                "axes": {"lvm_pool_max": [4, 8, 16]},
-            }))
+            cfg = self._write_matrix(
+                tdp,
+                json.dumps(
+                    {
+                        "name": "m",
+                        "defaults": {
+                            "workload": "smoke",
+                            "kind": "bughunt",
+                            "kconfig_profile": "standard",
+                        },
+                        "axes": {"lvm_pool_max": [4, 8, 16]},
+                    }
+                ),
+            )
             debug_kernel = tdp / "tools"
             debug_kernel.mkdir()
             helper = debug_kernel / "enable-debug-kconfig.sh"
@@ -696,12 +818,18 @@ class MatrixKconfigValidationTests(unittest.TestCase):
             kernel_tree.mkdir()
             args = [
                 "matrix",
-                "--config", str(cfg),
-                "--runs-root", str(tdp / "runs"),
-                "--ssh-key", "/dev/null",
-                "--launcher", "/nonexistent/run.sh",
-                "--debug-kernel", str(debug_kernel),
-                "--kernel-tree", str(kernel_tree),
+                "--config",
+                str(cfg),
+                "--runs-root",
+                str(tdp / "runs"),
+                "--ssh-key",
+                "/dev/null",
+                "--launcher",
+                "/nonexistent/run.sh",
+                "--debug-kernel",
+                str(debug_kernel),
+                "--kernel-tree",
+                str(kernel_tree),
                 "--build-kernel",
             ]
             run_calls: list[list[str]] = []
@@ -710,19 +838,26 @@ class MatrixKconfigValidationTests(unittest.TestCase):
                 run_calls.append(list(cmd))
                 return subprocess.CompletedProcess(cmd, 0)
 
-            with _PatchHostEnv(), \
-                 patch.object(cli.subprocess, "run", side_effect=_fake_subprocess_run), \
-                 patch.object(qemu, "spawn", return_value=_fake_handle()), \
-                 patch.object(qemu, "stop", return_value=0), \
-                 patch.object(ssh, "wait_for_ssh", return_value=True), \
-                 patch.object(ssh, "run", side_effect=_fake_ssh_ok), \
-                 patch("harness.workloads.by_name",
-                       return_value=lambda t, c: cell_runner.WorkloadResult(name="smoke")):
+            with (
+                _PatchHostEnv(),
+                patch.object(cli.subprocess, "run", side_effect=_fake_subprocess_run),
+                patch.object(qemu, "spawn", return_value=_fake_handle()),
+                patch.object(qemu, "stop", return_value=0),
+                patch.object(ssh, "wait_for_ssh", return_value=True),
+                patch.object(ssh, "run", side_effect=_fake_ssh_ok),
+                patch(
+                    "harness.workloads.by_name",
+                    return_value=lambda t, c: cell_runner.WorkloadResult(name="smoke"),
+                ),
+            ):
                 cli.main(args)
 
             helper_calls = [c for c in run_calls if str(c[0]).endswith("enable-debug-kconfig.sh")]
-            self.assertEqual(len(helper_calls), 1,
-                             f"helper should run exactly once for one distinct profile, got {helper_calls!r}")
+            self.assertEqual(
+                len(helper_calls),
+                1,
+                f"helper should run exactly once for one distinct profile, got {helper_calls!r}",
+            )
             call = helper_calls[0]
             self.assertIn("--kernel", call)
             self.assertEqual(call[call.index("--kernel") + 1], str(kernel_tree))
@@ -735,16 +870,24 @@ class MatrixKconfigValidationTests(unittest.TestCase):
 # and must exist before the helper subprocess runs.
 # ---------------------------------------------------------------------------
 
+
 class BuildKernelRealHelperContractTests(unittest.TestCase):
     def test_build_kernel_requires_kernel_tree(self):
         with TemporaryDirectory() as td:
             tdp = Path(td)
             cfg = tdp / "matrix.json"
-            cfg.write_text(json.dumps({
-                "name": "m",
-                "defaults": {"workload": "smoke", "kind": "bughunt",
-                             "kconfig_profile": "standard"},
-            }))
+            cfg.write_text(
+                json.dumps(
+                    {
+                        "name": "m",
+                        "defaults": {
+                            "workload": "smoke",
+                            "kind": "bughunt",
+                            "kconfig_profile": "standard",
+                        },
+                    }
+                )
+            )
             debug_kernel = tdp / "tools"
             debug_kernel.mkdir()
             helper = debug_kernel / "enable-debug-kconfig.sh"
@@ -753,11 +896,16 @@ class BuildKernelRealHelperContractTests(unittest.TestCase):
 
             args = [
                 "matrix",
-                "--config", str(cfg),
-                "--runs-root", str(tdp / "runs"),
-                "--ssh-key", "/dev/null",
-                "--launcher", "/nonexistent/run.sh",
-                "--debug-kernel", str(debug_kernel),
+                "--config",
+                str(cfg),
+                "--runs-root",
+                str(tdp / "runs"),
+                "--ssh-key",
+                "/dev/null",
+                "--launcher",
+                "/nonexistent/run.sh",
+                "--debug-kernel",
+                str(debug_kernel),
                 "--build-kernel",
                 # Intentionally NO --kernel-tree.
             ]
@@ -768,27 +916,37 @@ class BuildKernelRealHelperContractTests(unittest.TestCase):
                 called.append(list(cmd))
                 return subprocess.CompletedProcess(cmd, 0)
 
-            with _PatchHostEnv(), \
-                 patch.object(cli.subprocess, "run", side_effect=_record):
+            with _PatchHostEnv(), patch.object(cli.subprocess, "run", side_effect=_record):
                 rc = cli.main(args)
 
-            self.assertEqual(rc, cli.KSFT_FAIL,
-                             "--build-kernel without --kernel-tree must fail at planning")
-            self.assertFalse((tdp / "runs").exists(),
-                             "runs dir must not be created when --kernel-tree is missing")
+            self.assertEqual(
+                rc, cli.KSFT_FAIL, "--build-kernel without --kernel-tree must fail at planning"
+            )
+            self.assertFalse(
+                (tdp / "runs").exists(),
+                "runs dir must not be created when --kernel-tree is missing",
+            )
             helper_calls = [c for c in called if str(c[0]).endswith("enable-debug-kconfig.sh")]
-            self.assertEqual(helper_calls, [],
-                             "helper must not be invoked when --kernel-tree is missing")
+            self.assertEqual(
+                helper_calls, [], "helper must not be invoked when --kernel-tree is missing"
+            )
 
     def test_build_kernel_rejects_nonexistent_kernel_tree(self):
         with TemporaryDirectory() as td:
             tdp = Path(td)
             cfg = tdp / "matrix.json"
-            cfg.write_text(json.dumps({
-                "name": "m",
-                "defaults": {"workload": "smoke", "kind": "bughunt",
-                             "kconfig_profile": "standard"},
-            }))
+            cfg.write_text(
+                json.dumps(
+                    {
+                        "name": "m",
+                        "defaults": {
+                            "workload": "smoke",
+                            "kind": "bughunt",
+                            "kconfig_profile": "standard",
+                        },
+                    }
+                )
+            )
             debug_kernel = tdp / "tools"
             debug_kernel.mkdir()
             helper = debug_kernel / "enable-debug-kconfig.sh"
@@ -799,12 +957,18 @@ class BuildKernelRealHelperContractTests(unittest.TestCase):
 
             args = [
                 "matrix",
-                "--config", str(cfg),
-                "--runs-root", str(tdp / "runs"),
-                "--ssh-key", "/dev/null",
-                "--launcher", "/nonexistent/run.sh",
-                "--debug-kernel", str(debug_kernel),
-                "--kernel-tree", str(missing_tree),
+                "--config",
+                str(cfg),
+                "--runs-root",
+                str(tdp / "runs"),
+                "--ssh-key",
+                "/dev/null",
+                "--launcher",
+                "/nonexistent/run.sh",
+                "--debug-kernel",
+                str(debug_kernel),
+                "--kernel-tree",
+                str(missing_tree),
                 "--build-kernel",
             ]
             called: list[list[str]] = []
@@ -813,14 +977,14 @@ class BuildKernelRealHelperContractTests(unittest.TestCase):
                 called.append(list(cmd))
                 return subprocess.CompletedProcess(cmd, 0)
 
-            with _PatchHostEnv(), \
-                 patch.object(cli.subprocess, "run", side_effect=_record):
+            with _PatchHostEnv(), patch.object(cli.subprocess, "run", side_effect=_record):
                 rc = cli.main(args)
 
             self.assertEqual(rc, cli.KSFT_FAIL)
             helper_calls = [c for c in called if str(c[0]).endswith("enable-debug-kconfig.sh")]
-            self.assertEqual(helper_calls, [],
-                             "helper must not be invoked when --kernel-tree path is missing")
+            self.assertEqual(
+                helper_calls, [], "helper must not be invoked when --kernel-tree path is missing"
+            )
 
     def test_build_kernel_argv_includes_kernel_and_profile_in_order(self):
         # Asserts the EXACT subprocess argv shape: helper, --kernel, <tree>,
@@ -828,11 +992,18 @@ class BuildKernelRealHelperContractTests(unittest.TestCase):
         with TemporaryDirectory() as td:
             tdp = Path(td)
             cfg = tdp / "matrix.json"
-            cfg.write_text(json.dumps({
-                "name": "m",
-                "defaults": {"workload": "smoke", "kind": "bughunt",
-                             "kconfig_profile": "full"},
-            }))
+            cfg.write_text(
+                json.dumps(
+                    {
+                        "name": "m",
+                        "defaults": {
+                            "workload": "smoke",
+                            "kind": "bughunt",
+                            "kconfig_profile": "full",
+                        },
+                    }
+                )
+            )
             debug_kernel = tdp / "tools"
             debug_kernel.mkdir()
             helper = debug_kernel / "enable-debug-kconfig.sh"
@@ -843,12 +1014,18 @@ class BuildKernelRealHelperContractTests(unittest.TestCase):
 
             args = [
                 "matrix",
-                "--config", str(cfg),
-                "--runs-root", str(tdp / "runs"),
-                "--ssh-key", "/dev/null",
-                "--launcher", "/nonexistent/run.sh",
-                "--debug-kernel", str(debug_kernel),
-                "--kernel-tree", str(kernel_tree),
+                "--config",
+                str(cfg),
+                "--runs-root",
+                str(tdp / "runs"),
+                "--ssh-key",
+                "/dev/null",
+                "--launcher",
+                "/nonexistent/run.sh",
+                "--debug-kernel",
+                str(debug_kernel),
+                "--kernel-tree",
+                str(kernel_tree),
                 "--build-kernel",
             ]
             called: list[list[str]] = []
@@ -857,22 +1034,28 @@ class BuildKernelRealHelperContractTests(unittest.TestCase):
                 called.append(list(cmd))
                 return subprocess.CompletedProcess(cmd, 0)
 
-            with _PatchHostEnv(), \
-                 patch.object(cli.subprocess, "run", side_effect=_record), \
-                 patch.object(qemu, "spawn", return_value=_fake_handle()), \
-                 patch.object(qemu, "stop", return_value=0), \
-                 patch.object(ssh, "wait_for_ssh", return_value=True), \
-                 patch.object(ssh, "run", side_effect=_fake_ssh_ok), \
-                 patch("harness.workloads.by_name",
-                       return_value=lambda t, c: cell_runner.WorkloadResult(name="smoke")):
+            with (
+                _PatchHostEnv(),
+                patch.object(cli.subprocess, "run", side_effect=_record),
+                patch.object(qemu, "spawn", return_value=_fake_handle()),
+                patch.object(qemu, "stop", return_value=0),
+                patch.object(ssh, "wait_for_ssh", return_value=True),
+                patch.object(ssh, "run", side_effect=_fake_ssh_ok),
+                patch(
+                    "harness.workloads.by_name",
+                    return_value=lambda t, c: cell_runner.WorkloadResult(name="smoke"),
+                ),
+            ):
                 cli.main(args)
 
             helper_calls = [c for c in called if str(c[0]).endswith("enable-debug-kconfig.sh")]
             self.assertEqual(len(helper_calls), 1)
-            expected = [str(helper), "--kernel", str(kernel_tree),
-                        "--profile", "full"]
-            self.assertEqual(helper_calls[0], expected,
-                             f"argv must be exactly {expected!r}, got {helper_calls[0]!r}")
+            expected = [str(helper), "--kernel", str(kernel_tree), "--profile", "full"]
+            self.assertEqual(
+                helper_calls[0],
+                expected,
+                f"argv must be exactly {expected!r}, got {helper_calls[0]!r}",
+            )
 
     def test_build_kernel_against_helper_that_requires_kernel(self):
         # Use a fake helper that mimics the real script: rejects missing
@@ -881,11 +1064,18 @@ class BuildKernelRealHelperContractTests(unittest.TestCase):
         with TemporaryDirectory() as td:
             tdp = Path(td)
             cfg = tdp / "matrix.json"
-            cfg.write_text(json.dumps({
-                "name": "m",
-                "defaults": {"workload": "smoke", "kind": "bughunt",
-                             "kconfig_profile": "standard"},
-            }))
+            cfg.write_text(
+                json.dumps(
+                    {
+                        "name": "m",
+                        "defaults": {
+                            "workload": "smoke",
+                            "kind": "bughunt",
+                            "kconfig_profile": "standard",
+                        },
+                    }
+                )
+            )
             debug_kernel = tdp / "tools"
             debug_kernel.mkdir()
             helper = debug_kernel / "enable-debug-kconfig.sh"
@@ -893,13 +1083,13 @@ class BuildKernelRealHelperContractTests(unittest.TestCase):
                 "#!/bin/sh\n"
                 "saw_kernel=0\n"
                 "while [ $# -gt 0 ]; do\n"
-                "  case \"$1\" in\n"
+                '  case "$1" in\n'
                 "    --kernel) saw_kernel=1; shift 2 ;;\n"
                 "    --profile) shift 2 ;;\n"
                 "    *) shift ;;\n"
                 "  esac\n"
                 "done\n"
-                "if [ \"$saw_kernel\" -ne 1 ]; then\n"
+                'if [ "$saw_kernel" -ne 1 ]; then\n'
                 "  echo 'fake helper: --kernel is required' >&2\n"
                 "  exit 1\n"
                 "fi\n"
@@ -911,27 +1101,40 @@ class BuildKernelRealHelperContractTests(unittest.TestCase):
 
             args = [
                 "matrix",
-                "--config", str(cfg),
-                "--runs-root", str(tdp / "runs"),
-                "--ssh-key", "/dev/null",
-                "--launcher", "/nonexistent/run.sh",
-                "--debug-kernel", str(debug_kernel),
-                "--kernel-tree", str(kernel_tree),
+                "--config",
+                str(cfg),
+                "--runs-root",
+                str(tdp / "runs"),
+                "--ssh-key",
+                "/dev/null",
+                "--launcher",
+                "/nonexistent/run.sh",
+                "--debug-kernel",
+                str(debug_kernel),
+                "--kernel-tree",
+                str(kernel_tree),
                 "--build-kernel",
             ]
-            with _PatchHostEnv(), \
-                 patch.object(qemu, "spawn", return_value=_fake_handle()), \
-                 patch.object(qemu, "stop", return_value=0), \
-                 patch.object(ssh, "wait_for_ssh", return_value=True), \
-                 patch.object(ssh, "run", side_effect=_fake_ssh_ok), \
-                 patch("harness.workloads.by_name",
-                       return_value=lambda t, c: cell_runner.WorkloadResult(name="smoke")):
+            with (
+                _PatchHostEnv(),
+                patch.object(qemu, "spawn", return_value=_fake_handle()),
+                patch.object(qemu, "stop", return_value=0),
+                patch.object(ssh, "wait_for_ssh", return_value=True),
+                patch.object(ssh, "run", side_effect=_fake_ssh_ok),
+                patch(
+                    "harness.workloads.by_name",
+                    return_value=lambda t, c: cell_runner.WorkloadResult(name="smoke"),
+                ),
+            ):
                 # The real subprocess.run actually executes our fake helper
                 # script. If our wiring drops --kernel, the helper exits 1
                 # and the matrix planning gate returns KSFT_FAIL.
                 rc = cli.main(args)
-            self.assertNotEqual(rc, cli.KSFT_FAIL,
-                                "helper that requires --kernel must succeed when we pass --kernel")
+            self.assertNotEqual(
+                rc,
+                cli.KSFT_FAIL,
+                "helper that requires --kernel must succeed when we pass --kernel",
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -939,15 +1142,15 @@ class BuildKernelRealHelperContractTests(unittest.TestCase):
 # the run doesn't sit blocked on cf.as_completed waiting for queued cells.
 # ---------------------------------------------------------------------------
 
+
 class MatrixSigintCancelTests(unittest.TestCase):
     def test_sigint_cancels_queued_cells_and_runs_complete_fast(self):
         import os
+
         with TemporaryDirectory() as td:
             tdp = Path(td)
             cells = [
-                matrix.CellSpec(cell_id=f"c{i}",
-                                profile={"kind": "bughunt"},
-                                workload="smoke")
+                matrix.CellSpec(cell_id=f"c{i}", profile={"kind": "bughunt"}, workload="smoke")
                 for i in range(8)
             ]
             plan = matrix.MatrixPlan(name="sigint", cells=cells)
@@ -993,19 +1196,19 @@ class MatrixSigintCancelTests(unittest.TestCase):
             # The two cells that occupied the workers run to completion.
             passes = [cid for cid, v in verdicts.items() if v == "pass"]
             aborts = [cid for cid, v in verdicts.items() if v == "aborted"]
-            self.assertEqual(len(passes), 2,
-                             f"exactly two workers were in flight, got {verdicts}")
-            self.assertEqual(len(aborts), 6,
-                             f"the six queued cells must abort after SIGINT, "
-                             f"got {verdicts}")
+            self.assertEqual(len(passes), 2, f"exactly two workers were in flight, got {verdicts}")
+            self.assertEqual(
+                len(aborts), 6, f"the six queued cells must abort after SIGINT, got {verdicts}"
+            )
             # Aborted cells still get a result.json on disk so a triage script
             # can see the full plan.
             runs_subdirs = list((tdp / "runs").iterdir())
-            self.assertEqual(len(runs_subdirs), 1,
-                             "expected exactly one timestamped runs subdir")
+            self.assertEqual(len(runs_subdirs), 1, "expected exactly one timestamped runs subdir")
             for cid in aborts:
-                self.assertTrue((runs_subdirs[0] / cid / "result.json").exists(),
-                                f"missing result.json for aborted cell {cid}")
+                self.assertTrue(
+                    (runs_subdirs[0] / cid / "result.json").exists(),
+                    f"missing result.json for aborted cell {cid}",
+                )
 
 
 # ---------------------------------------------------------------------------
@@ -1013,6 +1216,7 @@ class MatrixSigintCancelTests(unittest.TestCase):
 # Hits populate result["journalctl_hits"] but MUST NOT influence verdict --
 # verdict belongs to serial.log + dmesg.log alone.
 # ---------------------------------------------------------------------------
+
 
 class JournalctlAuditTrailTests(unittest.TestCase):
     def _inputs(self, art: Path) -> cell_runner.CellInputs:
@@ -1023,8 +1227,9 @@ class JournalctlAuditTrailTests(unittest.TestCase):
             workload_name="smoke",
             launcher=Path("/nonexistent/run.sh"),
             artifact_dir=art,
-            ssh_target=ssh.SshTarget(host="127.0.0.1", port=10025, user="root",
-                                     key_path=Path("/dev/null")),
+            ssh_target=ssh.SshTarget(
+                host="127.0.0.1", port=10025, user="root", key_path=Path("/dev/null")
+            ),
             kvm_required=False,
         )
 
@@ -1035,24 +1240,29 @@ class JournalctlAuditTrailTests(unittest.TestCase):
             (art / "serial.log").write_text("[    0.000] Linux version 6.10\n")
             (art / "dmesg.log").write_text("[    0.001] boot\n")
             (art / "journalctl-kb.txt").write_text(
-                "kernel: BUG: KASAN: use-after-free in foo+0x10/0x20\n"
-                "kernel: Call Trace:\n"
+                "kernel: BUG: KASAN: use-after-free in foo+0x10/0x20\nkernel: Call Trace:\n"
             )
             inputs = self._inputs(art)
             ctx = cell_runner.CellContext(
-                cell_id=inputs.cell_id, artifact_dir=art,
-                target=inputs.ssh_target, profile=inputs.profile,
+                cell_id=inputs.cell_id,
+                artifact_dir=art,
+                target=inputs.ssh_target,
+                profile=inputs.profile,
             )
             r = schemas.empty_result(inputs.cell_id)
             out = cell_runner._classify_and_finalize(r, art, inputs, ctx, 0)
             # Verdict driven purely by serial+dmesg (no splat there) -> pass.
-            self.assertEqual(out["verdict"], "pass",
-                             "journalctl hits must not flip verdict to kernel-bug")
+            self.assertEqual(
+                out["verdict"], "pass", "journalctl hits must not flip verdict to kernel-bug"
+            )
             # Audit trail captured the journal-only splat.
-            self.assertTrue(out["journalctl_hits"],
-                            "journalctl_hits should be populated when journal has splat")
-            self.assertTrue(any("KASAN" in h["substring"] for h in out["journalctl_hits"]),
-                            f"expected KASAN hit, got {out['journalctl_hits']}")
+            self.assertTrue(
+                out["journalctl_hits"], "journalctl_hits should be populated when journal has splat"
+            )
+            self.assertTrue(
+                any("KASAN" in h["substring"] for h in out["journalctl_hits"]),
+                f"expected KASAN hit, got {out['journalctl_hits']}",
+            )
             # And serial/dmesg classification remained clean.
             self.assertEqual(out["classifier_hits"], [])
 
@@ -1065,8 +1275,10 @@ class JournalctlAuditTrailTests(unittest.TestCase):
             (art / "journalctl-kb.txt").write_text("kernel: nothing to see here\n")
             inputs = self._inputs(art)
             ctx = cell_runner.CellContext(
-                cell_id=inputs.cell_id, artifact_dir=art,
-                target=inputs.ssh_target, profile=inputs.profile,
+                cell_id=inputs.cell_id,
+                artifact_dir=art,
+                target=inputs.ssh_target,
+                profile=inputs.profile,
             )
             r = schemas.empty_result(inputs.cell_id)
             out = cell_runner._classify_and_finalize(r, art, inputs, ctx, 0)
@@ -1083,8 +1295,10 @@ class JournalctlAuditTrailTests(unittest.TestCase):
             # follower must not raise or pollute result.
             inputs = self._inputs(art)
             ctx = cell_runner.CellContext(
-                cell_id=inputs.cell_id, artifact_dir=art,
-                target=inputs.ssh_target, profile=inputs.profile,
+                cell_id=inputs.cell_id,
+                artifact_dir=art,
+                target=inputs.ssh_target,
+                profile=inputs.profile,
             )
             r = schemas.empty_result(inputs.cell_id)
             out = cell_runner._classify_and_finalize(r, art, inputs, ctx, 0)
@@ -1096,6 +1310,7 @@ class JournalctlAuditTrailTests(unittest.TestCase):
 # AC-5.1: perf image-warm preflight gates QEMU spawn for perf cells
 # ---------------------------------------------------------------------------
 
+
 class PerfImageWarmPreflightTests(unittest.TestCase):
     def _perf_inputs(self, art: Path, rootfs: Path) -> cell_runner.CellInputs:
         return cell_runner.CellInputs(
@@ -1105,8 +1320,9 @@ class PerfImageWarmPreflightTests(unittest.TestCase):
             workload_name="bench",
             launcher=Path("/nonexistent/run.sh"),
             artifact_dir=art,
-            ssh_target=ssh.SshTarget(host="127.0.0.1", port=10024, user="root",
-                                     key_path=Path("/dev/null")),
+            ssh_target=ssh.SshTarget(
+                host="127.0.0.1", port=10024, user="root", key_path=Path("/dev/null")
+            ),
             kvm_required=False,
             rootfs_image=rootfs,
         )
@@ -1120,9 +1336,7 @@ class PerfImageWarmPreflightTests(unittest.TestCase):
             # No `<rootfs>.warm-marker` -> preflight must skip.
 
             def _fail_spawn(*a, **kw):
-                raise AssertionError(
-                    "qemu.spawn must not be invoked for a cold-rootfs perf cell"
-                )
+                raise AssertionError("qemu.spawn must not be invoked for a cold-rootfs perf cell")
 
             inputs = self._perf_inputs(art, rootfs)
             with _PatchHostEnv(), patch.object(qemu, "spawn", side_effect=_fail_spawn):
@@ -1173,8 +1387,9 @@ class PerfImageWarmPreflightTests(unittest.TestCase):
                 workload_name="noop",
                 launcher=Path("/nonexistent/run.sh"),
                 artifact_dir=art,
-                ssh_target=ssh.SshTarget(host="127.0.0.1", port=10025, user="root",
-                                         key_path=Path("/dev/null")),
+                ssh_target=ssh.SshTarget(
+                    host="127.0.0.1", port=10025, user="root", key_path=Path("/dev/null")
+                ),
                 kvm_required=False,
                 rootfs_image=rootfs,
             )
@@ -1194,6 +1409,7 @@ class PerfImageWarmPreflightTests(unittest.TestCase):
 # AC-5.1 / AC-9: strict perf both-required (stats AND lsm_funcs)
 # ---------------------------------------------------------------------------
 
+
 class PerfStrictBothRequiredTests(unittest.TestCase):
     def _perf_inputs_warm(self, art: Path, rootfs: Path) -> cell_runner.CellInputs:
         # Pre-warm the rootfs so the image-warm gate (the *other* perf
@@ -1206,16 +1422,21 @@ class PerfStrictBothRequiredTests(unittest.TestCase):
             workload_name="bench",
             launcher=Path("/nonexistent/run.sh"),
             artifact_dir=art,
-            ssh_target=ssh.SshTarget(host="127.0.0.1", port=10026, user="root",
-                                     key_path=Path("/dev/null")),
+            ssh_target=ssh.SshTarget(
+                host="127.0.0.1", port=10026, user="root", key_path=Path("/dev/null")
+            ),
             kvm_required=False,
             rootfs_image=rootfs,
         )
 
-    def _run_perf_with_fetch(self, art: Path, rootfs: Path,
-                             stats_text: str | None,
-                             funcs_text: str | None,
-                             workload_invoked: list[bool]) -> dict:
+    def _run_perf_with_fetch(
+        self,
+        art: Path,
+        rootfs: Path,
+        stats_text: str | None,
+        funcs_text: str | None,
+        workload_invoked: list[bool],
+    ) -> dict:
         inputs = self._perf_inputs_warm(art, rootfs)
 
         def _wl(target, ctx):
@@ -1236,12 +1457,14 @@ class PerfStrictBothRequiredTests(unittest.TestCase):
             except StopIteration:
                 return (stats_text, funcs_text)
 
-        with _PatchHostEnv(), \
-             patch.object(qemu, "spawn", return_value=_fake_handle()), \
-             patch.object(qemu, "stop", return_value=0), \
-             patch.object(ssh, "wait_for_ssh", return_value=True), \
-             patch.object(ssh, "run", side_effect=_fake_ssh_ok), \
-             patch.object(cell_runner, "_fetch_perf_texts", side_effect=_fetch_pair):
+        with (
+            _PatchHostEnv(),
+            patch.object(qemu, "spawn", return_value=_fake_handle()),
+            patch.object(qemu, "stop", return_value=0),
+            patch.object(ssh, "wait_for_ssh", return_value=True),
+            patch.object(ssh, "run", side_effect=_fake_ssh_ok),
+            patch.object(cell_runner, "_fetch_perf_texts", side_effect=_fetch_pair),
+        ):
             return cell_runner.run_cell(inputs)
 
     def _stats_text(self) -> str:
@@ -1252,10 +1475,14 @@ class PerfStrictBothRequiredTests(unittest.TestCase):
         return "\n".join(lines) + "\n"
 
     def _funcs_text(self) -> str:
-        return ("stats for lua-lsm (ns)\n"
-                "num name                         nlsm        count           total    average      maxtime\n"
-                "----\n"
-                "  1 inode_permission             1           5               500      100         200\n")
+        return (
+            "stats for lua-lsm (ns)\n"
+            "num name                         nlsm        "
+            "count           total    average      maxtime\n"
+            "----\n"
+            "  1 inode_permission             1           "
+            "5               500      100         200\n"
+        )
 
     def test_perf_skip_when_only_stats_present(self):
         with TemporaryDirectory() as td:
@@ -1265,14 +1492,14 @@ class PerfStrictBothRequiredTests(unittest.TestCase):
             rootfs.write_bytes(b"")
             workload_invoked: list[bool] = []
             out = self._run_perf_with_fetch(
-                art, rootfs,
+                art,
+                rootfs,
                 stats_text=self._stats_text(),
                 funcs_text=None,
                 workload_invoked=workload_invoked,
             )
             self.assertEqual(out["verdict"], "skip:stats-unavailable")
-            self.assertFalse(workload_invoked,
-                             "workload must not run when perf preflight skips")
+            self.assertFalse(workload_invoked, "workload must not run when perf preflight skips")
             self.assertIsNone(out["perf"].get("snapshots"))
             self.assertIsNone(out["perf"].get("deltas"))
 
@@ -1284,7 +1511,8 @@ class PerfStrictBothRequiredTests(unittest.TestCase):
             rootfs.write_bytes(b"")
             workload_invoked: list[bool] = []
             out = self._run_perf_with_fetch(
-                art, rootfs,
+                art,
+                rootfs,
                 stats_text=None,
                 funcs_text=self._funcs_text(),
                 workload_invoked=workload_invoked,
@@ -1302,7 +1530,8 @@ class PerfStrictBothRequiredTests(unittest.TestCase):
             rootfs.write_bytes(b"")
             workload_invoked: list[bool] = []
             out = self._run_perf_with_fetch(
-                art, rootfs,
+                art,
+                rootfs,
                 stats_text=None,
                 funcs_text=None,
                 workload_invoked=workload_invoked,
@@ -1322,7 +1551,8 @@ class PerfStrictBothRequiredTests(unittest.TestCase):
             (art / "dmesg.log").write_text("[    0.000] Linux version 6.10\n")
             workload_invoked: list[bool] = []
             out = self._run_perf_with_fetch(
-                art, rootfs,
+                art,
+                rootfs,
                 stats_text=self._stats_text(),
                 funcs_text=self._funcs_text(),
                 workload_invoked=workload_invoked,
@@ -1343,19 +1573,24 @@ class PerfStrictBothRequiredTests(unittest.TestCase):
 
 def _required_counters_text() -> str:
     from harness import schemas as _s
+
     return "\n".join(f"{k} = {i}" for i, k in enumerate(_s.REQUIRED_COUNTER_KEYS)) + "\n"
 
 
 def _valid_funcs_text() -> str:
-    return ("stats for lua-lsm (ns)\n"
-            "num name                         nlsm        count           total    average      maxtime\n"
-            "----\n"
-            "  1 inode_permission             1           5               500      100         200\n")
+    return (
+        "stats for lua-lsm (ns)\n"
+        "num name                         nlsm        "
+        "count           total    average      maxtime\n"
+        "----\n"
+        "  1 inode_permission             1           5               500      100         200\n"
+    )
 
 
 class PerfSnapshotValidationTests(unittest.TestCase):
     def test_validate_snapshot_accepts_valid(self):
         from harness import perf_snapshot as ps
+
         snap = ps.Snapshot()
         snap.counters = ps.parse_stats_text(_required_counters_text())
         snap.lsm_funcs = ps.parse_lsm_funcs_text(_valid_funcs_text())
@@ -1363,6 +1598,7 @@ class PerfSnapshotValidationTests(unittest.TestCase):
 
     def test_validate_snapshot_rejects_missing_keys(self):
         from harness import perf_snapshot as ps
+
         snap = ps.Snapshot()
         snap.counters = {"lvm.nalloc": 0}  # only one of the required keys
         snap.lsm_funcs = ps.parse_lsm_funcs_text(_valid_funcs_text())
@@ -1372,6 +1608,7 @@ class PerfSnapshotValidationTests(unittest.TestCase):
 
     def test_validate_snapshot_rejects_empty_lsm_funcs(self):
         from harness import perf_snapshot as ps
+
         snap = ps.Snapshot()
         snap.counters = ps.parse_stats_text(_required_counters_text())
         snap.lsm_funcs = {}
@@ -1381,6 +1618,7 @@ class PerfSnapshotValidationTests(unittest.TestCase):
 
     def test_validate_snapshot_rejects_none(self):
         from harness import perf_snapshot as ps
+
         self.assertIsNotNone(ps.validate_snapshot(None))
 
 
@@ -1400,15 +1638,20 @@ class PerfStrictValidatesCountersTests(unittest.TestCase):
             workload_name="bench",
             launcher=Path("/nonexistent/run.sh"),
             artifact_dir=art,
-            ssh_target=ssh.SshTarget(host="127.0.0.1", port=10027, user="root",
-                                     key_path=Path("/dev/null")),
+            ssh_target=ssh.SshTarget(
+                host="127.0.0.1", port=10027, user="root", key_path=Path("/dev/null")
+            ),
             kvm_required=False,
             rootfs_image=rootfs,
         )
 
-    def _run(self, art: Path, rootfs: Path,
-             before_pair: tuple[str | None, str | None],
-             after_pair: tuple[str | None, str | None]) -> dict:
+    def _run(
+        self,
+        art: Path,
+        rootfs: Path,
+        before_pair: tuple[str | None, str | None],
+        after_pair: tuple[str | None, str | None],
+    ) -> dict:
         inputs = self._perf_inputs_warm(art, rootfs)
         workload_invoked: list[bool] = []
 
@@ -1433,12 +1676,14 @@ class PerfStrictValidatesCountersTests(unittest.TestCase):
         art.mkdir(parents=True, exist_ok=True)
         (art / "dmesg.log").write_text("[    0.000] Linux version 6.10\n")
 
-        with _PatchHostEnv(), \
-             patch.object(qemu, "spawn", return_value=_fake_handle()), \
-             patch.object(qemu, "stop", return_value=0), \
-             patch.object(ssh, "wait_for_ssh", return_value=True), \
-             patch.object(ssh, "run", side_effect=_fake_ssh_ok), \
-             patch.object(cell_runner, "_fetch_perf_texts", side_effect=_fetch):
+        with (
+            _PatchHostEnv(),
+            patch.object(qemu, "spawn", return_value=_fake_handle()),
+            patch.object(qemu, "stop", return_value=0),
+            patch.object(ssh, "wait_for_ssh", return_value=True),
+            patch.object(ssh, "run", side_effect=_fake_ssh_ok),
+            patch.object(cell_runner, "_fetch_perf_texts", side_effect=_fetch),
+        ):
             result = cell_runner.run_cell(inputs)
         result["__workload_invoked__"] = bool(workload_invoked)
         return result
@@ -1448,14 +1693,17 @@ class PerfStrictValidatesCountersTests(unittest.TestCase):
         with TemporaryDirectory() as td:
             tdp = Path(td)
             out = self._run(
-                tdp / "perf", tdp / "rootfs.img",
+                tdp / "perf",
+                tdp / "rootfs.img",
                 before_pair=(bad_stats, _valid_funcs_text()),
                 after_pair=(_required_counters_text(), _valid_funcs_text()),
             )
             self.assertEqual(out["verdict"], "skip:stats-unavailable")
             self.assertIn("malformed", out["reason"])
-            self.assertFalse(out["__workload_invoked__"],
-                             "workload must not run when before-snapshot is malformed")
+            self.assertFalse(
+                out["__workload_invoked__"],
+                "workload must not run when before-snapshot is malformed",
+            )
             self.assertIsNone(out["perf"].get("snapshots"))
             self.assertIsNone(out["perf"].get("deltas"))
 
@@ -1464,7 +1712,8 @@ class PerfStrictValidatesCountersTests(unittest.TestCase):
         with TemporaryDirectory() as td:
             tdp = Path(td)
             out = self._run(
-                tdp / "perf", tdp / "rootfs.img",
+                tdp / "perf",
+                tdp / "rootfs.img",
                 before_pair=(_required_counters_text(), empty_funcs),
                 after_pair=(_required_counters_text(), _valid_funcs_text()),
             )
@@ -1477,17 +1726,22 @@ class PerfStrictValidatesCountersTests(unittest.TestCase):
         with TemporaryDirectory() as td:
             tdp = Path(td)
             out = self._run(
-                tdp / "perf", tdp / "rootfs.img",
+                tdp / "perf",
+                tdp / "rootfs.img",
                 before_pair=(_required_counters_text(), _valid_funcs_text()),
                 after_pair=(bad_stats, _valid_funcs_text()),
             )
-            self.assertEqual(out["verdict"], "skip:stats-unavailable",
-                             f"got verdict={out.get('verdict')!r}")
-            self.assertTrue(out["__workload_invoked__"],
-                            "workload runs when before-snapshot is valid")
+            self.assertEqual(
+                out["verdict"], "skip:stats-unavailable", f"got verdict={out.get('verdict')!r}"
+            )
+            self.assertTrue(
+                out["__workload_invoked__"], "workload runs when before-snapshot is valid"
+            )
             self.assertIn("malformed", out["reason"])
-            self.assertIsNone(out["perf"].get("snapshots"),
-                              "malformed-after must NOT emit partial-delta snapshots")
+            self.assertIsNone(
+                out["perf"].get("snapshots"),
+                "malformed-after must NOT emit partial-delta snapshots",
+            )
             self.assertIsNone(out["perf"].get("deltas"))
 
     def test_malformed_after_lsm_funcs_skips_no_partial_deltas(self):
@@ -1495,7 +1749,8 @@ class PerfStrictValidatesCountersTests(unittest.TestCase):
         with TemporaryDirectory() as td:
             tdp = Path(td)
             out = self._run(
-                tdp / "perf", tdp / "rootfs.img",
+                tdp / "perf",
+                tdp / "rootfs.img",
                 before_pair=(_required_counters_text(), _valid_funcs_text()),
                 after_pair=(_required_counters_text(), empty_funcs),
             )
@@ -1508,12 +1763,12 @@ class PerfStrictValidatesCountersTests(unittest.TestCase):
         with TemporaryDirectory() as td:
             tdp = Path(td)
             out = self._run(
-                tdp / "perf", tdp / "rootfs.img",
+                tdp / "perf",
+                tdp / "rootfs.img",
                 before_pair=(_required_counters_text(), _valid_funcs_text()),
                 after_pair=(_required_counters_text(), _valid_funcs_text()),
             )
-            self.assertEqual(out["verdict"], "pass",
-                             f"got verdict={out.get('verdict')!r}")
+            self.assertEqual(out["verdict"], "pass", f"got verdict={out.get('verdict')!r}")
             self.assertIsNotNone(out["perf"]["snapshots"])
             self.assertIn("before", out["perf"]["snapshots"])
             self.assertIn("after", out["perf"]["snapshots"])
@@ -1525,8 +1780,6 @@ class PerfStrictValidatesCountersTests(unittest.TestCase):
 # with KSFT exit map 0 (pass) / 1 (bad) / 125 (untestable) / 128 (abort).
 # ---------------------------------------------------------------------------
 
-from harness import bisect as bisect_mod
-
 
 class BisectRunCellModeTests(unittest.TestCase):
     def _write_cell(self, tdp: Path, profile: dict) -> Path:
@@ -1534,15 +1787,19 @@ class BisectRunCellModeTests(unittest.TestCase):
         p.write_text(json.dumps(profile))
         return p
 
-    def _common_args(self, tdp: Path, cell_path: Path,
-                     extra: list[str] | None = None) -> list[str]:
+    def _common_args(self, tdp: Path, cell_path: Path, extra: list[str] | None = None) -> list[str]:
         args = [
             "bisect-run",
-            "--cell", str(cell_path),
-            "--ssh-key", "/dev/null",
-            "--launcher", "/nonexistent/run.sh",
-            "--runs-root", str(tdp / "runs"),
-            "--port-base", "23000",
+            "--cell",
+            str(cell_path),
+            "--ssh-key",
+            "/dev/null",
+            "--launcher",
+            "/nonexistent/run.sh",
+            "--runs-root",
+            str(tdp / "runs"),
+            "--port-base",
+            "23000",
         ]
         if extra:
             args.extend(extra)
@@ -1551,42 +1808,50 @@ class BisectRunCellModeTests(unittest.TestCase):
     def test_clean_cell_returns_ksft_pass(self):
         with TemporaryDirectory() as td:
             tdp = Path(td)
-            cell = self._write_cell(tdp, {
-                "workload": "smoke", "kind": "bughunt",
-            })
+            cell = self._write_cell(
+                tdp,
+                {
+                    "workload": "smoke",
+                    "kind": "bughunt",
+                },
+            )
 
             def _stub_run_cell(inputs, host=None):
                 inputs.artifact_dir.mkdir(parents=True, exist_ok=True)
                 result = {
-                    "schema_version": 1, "cell_id": inputs.cell_id,
+                    "schema_version": 1,
+                    "cell_id": inputs.cell_id,
                     "verdict": "pass",
                 }
                 (inputs.artifact_dir / "result.json").write_text(json.dumps(result))
                 return result
 
-            with _PatchHostEnv(), \
-                 patch.object(cell_runner, "run_cell", side_effect=_stub_run_cell):
+            with _PatchHostEnv(), patch.object(cell_runner, "run_cell", side_effect=_stub_run_cell):
                 rc = cli.main(self._common_args(tdp, cell))
             self.assertEqual(rc, bisect_mod.KSFT_PASS)
 
     def test_classifier_hit_returns_ksft_fail(self):
         with TemporaryDirectory() as td:
             tdp = Path(td)
-            cell = self._write_cell(tdp, {
-                "workload": "smoke", "kind": "bughunt",
-            })
+            cell = self._write_cell(
+                tdp,
+                {
+                    "workload": "smoke",
+                    "kind": "bughunt",
+                },
+            )
 
             def _stub_run_cell(inputs, host=None):
                 inputs.artifact_dir.mkdir(parents=True, exist_ok=True)
                 result = {
-                    "schema_version": 1, "cell_id": inputs.cell_id,
+                    "schema_version": 1,
+                    "cell_id": inputs.cell_id,
                     "verdict": "kernel-bug",
                 }
                 (inputs.artifact_dir / "result.json").write_text(json.dumps(result))
                 return result
 
-            with _PatchHostEnv(), \
-                 patch.object(cell_runner, "run_cell", side_effect=_stub_run_cell):
+            with _PatchHostEnv(), patch.object(cell_runner, "run_cell", side_effect=_stub_run_cell):
                 rc = cli.main(self._common_args(tdp, cell))
             self.assertEqual(rc, bisect_mod.KSFT_FAIL)
 
@@ -1595,10 +1860,14 @@ class BisectRunCellModeTests(unittest.TestCase):
         # commit cannot be tested. Bisect must skip (125), not fail (1).
         with TemporaryDirectory() as td:
             tdp = Path(td)
-            cell = self._write_cell(tdp, {
-                "workload": "smoke", "kind": "bughunt",
-                "kconfig_profile": "standard",
-            })
+            cell = self._write_cell(
+                tdp,
+                {
+                    "workload": "smoke",
+                    "kind": "bughunt",
+                    "kconfig_profile": "standard",
+                },
+            )
             debug_kernel = tdp / "tools"
             debug_kernel.mkdir()
             helper = debug_kernel / "enable-debug-kconfig.sh"
@@ -1607,34 +1876,45 @@ class BisectRunCellModeTests(unittest.TestCase):
             kernel_tree = tdp / "linux"
             kernel_tree.mkdir()
 
-            args = self._common_args(tdp, cell, extra=[
-                "--debug-kernel", str(debug_kernel),
-                "--kernel-tree", str(kernel_tree),
-                "--build-kernel",
-            ])
+            args = self._common_args(
+                tdp,
+                cell,
+                extra=[
+                    "--debug-kernel",
+                    str(debug_kernel),
+                    "--kernel-tree",
+                    str(kernel_tree),
+                    "--build-kernel",
+                ],
+            )
             with _PatchHostEnv():
                 rc = cli.main(args)
-            self.assertEqual(rc, bisect_mod.KSFT_SKIP,
-                             "build-helper failure must be bisect-skip (125), not fail")
+            self.assertEqual(
+                rc, bisect_mod.KSFT_SKIP, "build-helper failure must be bisect-skip (125), not fail"
+            )
 
     def test_image_not_warm_verdict_returns_ksft_skip(self):
         with TemporaryDirectory() as td:
             tdp = Path(td)
-            cell = self._write_cell(tdp, {
-                "workload": "bench", "kind": "perf",
-            })
+            cell = self._write_cell(
+                tdp,
+                {
+                    "workload": "bench",
+                    "kind": "perf",
+                },
+            )
 
             def _stub_run_cell(inputs, host=None):
                 inputs.artifact_dir.mkdir(parents=True, exist_ok=True)
                 result = {
-                    "schema_version": 1, "cell_id": inputs.cell_id,
+                    "schema_version": 1,
+                    "cell_id": inputs.cell_id,
                     "verdict": "skip:image-not-warm",
                 }
                 (inputs.artifact_dir / "result.json").write_text(json.dumps(result))
                 return result
 
-            with _PatchHostEnv(), \
-                 patch.object(cell_runner, "run_cell", side_effect=_stub_run_cell):
+            with _PatchHostEnv(), patch.object(cell_runner, "run_cell", side_effect=_stub_run_cell):
                 rc = cli.main(self._common_args(tdp, cell))
             self.assertEqual(rc, bisect_mod.KSFT_SKIP)
 
@@ -1642,21 +1922,25 @@ class BisectRunCellModeTests(unittest.TestCase):
         # build-fail is FAIL_VERDICTS for TAP but UNTESTABLE for bisect.
         with TemporaryDirectory() as td:
             tdp = Path(td)
-            cell = self._write_cell(tdp, {
-                "workload": "smoke", "kind": "bughunt",
-            })
+            cell = self._write_cell(
+                tdp,
+                {
+                    "workload": "smoke",
+                    "kind": "bughunt",
+                },
+            )
 
             def _stub_run_cell(inputs, host=None):
                 inputs.artifact_dir.mkdir(parents=True, exist_ok=True)
                 result = {
-                    "schema_version": 1, "cell_id": inputs.cell_id,
+                    "schema_version": 1,
+                    "cell_id": inputs.cell_id,
                     "verdict": "build-fail",
                 }
                 (inputs.artifact_dir / "result.json").write_text(json.dumps(result))
                 return result
 
-            with _PatchHostEnv(), \
-                 patch.object(cell_runner, "run_cell", side_effect=_stub_run_cell):
+            with _PatchHostEnv(), patch.object(cell_runner, "run_cell", side_effect=_stub_run_cell):
                 rc = cli.main(self._common_args(tdp, cell))
             self.assertEqual(rc, bisect_mod.KSFT_SKIP)
 
@@ -1666,40 +1950,46 @@ class BisectRunCellModeTests(unittest.TestCase):
         # the commit on a harness-side packaging failure.
         with TemporaryDirectory() as td:
             tdp = Path(td)
-            cell = self._write_cell(tdp, {
-                "workload": "smoke", "kind": "bughunt",
-            })
+            cell = self._write_cell(
+                tdp,
+                {
+                    "workload": "smoke",
+                    "kind": "bughunt",
+                },
+            )
 
             def _stub_run_cell(inputs, host=None):
                 inputs.artifact_dir.mkdir(parents=True, exist_ok=True)
                 # The kernel produced a real hit (so the bundle attempt fired)
                 # but bundle packaging blew up.
                 result = {
-                    "schema_version": 1, "cell_id": inputs.cell_id,
+                    "schema_version": 1,
+                    "cell_id": inputs.cell_id,
                     "verdict": "kernel-bug",
                     "bundle_error": "OSError: disk full",
                 }
                 (inputs.artifact_dir / "result.json").write_text(json.dumps(result))
                 return result
 
-            with _PatchHostEnv(), \
-                 patch.object(cell_runner, "run_cell", side_effect=_stub_run_cell):
+            with _PatchHostEnv(), patch.object(cell_runner, "run_cell", side_effect=_stub_run_cell):
                 rc = cli.main(self._common_args(tdp, cell))
-            self.assertEqual(rc, bisect_mod.KSFT_ABORT,
-                             "bundle_error must abort bisect (128)")
+            self.assertEqual(rc, bisect_mod.KSFT_ABORT, "bundle_error must abort bisect (128)")
 
     def test_run_cell_raises_returns_ksft_abort(self):
         with TemporaryDirectory() as td:
             tdp = Path(td)
-            cell = self._write_cell(tdp, {
-                "workload": "smoke", "kind": "bughunt",
-            })
+            cell = self._write_cell(
+                tdp,
+                {
+                    "workload": "smoke",
+                    "kind": "bughunt",
+                },
+            )
 
             def _stub_run_cell(inputs, host=None):
                 raise RuntimeError("harness internal blew up")
 
-            with _PatchHostEnv(), \
-                 patch.object(cell_runner, "run_cell", side_effect=_stub_run_cell):
+            with _PatchHostEnv(), patch.object(cell_runner, "run_cell", side_effect=_stub_run_cell):
                 rc = cli.main(self._common_args(tdp, cell))
             self.assertEqual(rc, bisect_mod.KSFT_ABORT)
 
@@ -1710,52 +2000,73 @@ class BisectRunCellModeTests(unittest.TestCase):
             mat = tdp / "m.json"
             mat.write_text(json.dumps({"name": "m", "defaults": {"workload": "smoke"}}))
             args = [
-                "bisect-run", "--cell", str(cell), "--config", str(mat),
-                "--ssh-key", "/dev/null",
-                "--launcher", "/nonexistent/run.sh",
-                "--runs-root", str(tdp / "runs"),
+                "bisect-run",
+                "--cell",
+                str(cell),
+                "--config",
+                str(mat),
+                "--ssh-key",
+                "/dev/null",
+                "--launcher",
+                "/nonexistent/run.sh",
+                "--runs-root",
+                str(tdp / "runs"),
             ]
-            with _PatchHostEnv():
-                with self.assertRaises(SystemExit) as cm:
-                    cli.main(args)
-            self.assertNotEqual(cm.exception.code, 0,
-                                "argparse must reject --cell with --config")
+            with _PatchHostEnv(), self.assertRaises(SystemExit) as cm:
+                cli.main(args)
+            self.assertNotEqual(cm.exception.code, 0, "argparse must reject --cell with --config")
 
 
 class BisectExitCodeMappingTests(unittest.TestCase):
     """Pure mapping tests over bisect.exit_code_from_cell_result()."""
 
     def test_pass(self):
-        self.assertEqual(bisect_mod.exit_code_from_cell_result({"verdict": "pass"}),
-                         bisect_mod.KSFT_PASS)
+        self.assertEqual(
+            bisect_mod.exit_code_from_cell_result({"verdict": "pass"}), bisect_mod.KSFT_PASS
+        )
 
     def test_kernel_bug_is_bad(self):
-        self.assertEqual(bisect_mod.exit_code_from_cell_result({"verdict": "kernel-bug"}),
-                         bisect_mod.KSFT_FAIL)
+        self.assertEqual(
+            bisect_mod.exit_code_from_cell_result({"verdict": "kernel-bug"}), bisect_mod.KSFT_FAIL
+        )
 
     def test_workload_fail_is_bad(self):
-        self.assertEqual(bisect_mod.exit_code_from_cell_result({"verdict": "workload-fail"}),
-                         bisect_mod.KSFT_FAIL)
+        self.assertEqual(
+            bisect_mod.exit_code_from_cell_result({"verdict": "workload-fail"}),
+            bisect_mod.KSFT_FAIL,
+        )
 
     def test_build_fail_is_untestable(self):
-        self.assertEqual(bisect_mod.exit_code_from_cell_result({"verdict": "build-fail"}),
-                         bisect_mod.KSFT_SKIP)
+        self.assertEqual(
+            bisect_mod.exit_code_from_cell_result({"verdict": "build-fail"}), bisect_mod.KSFT_SKIP
+        )
 
     def test_boot_timeout_is_untestable(self):
-        self.assertEqual(bisect_mod.exit_code_from_cell_result({"verdict": "boot-timeout"}),
-                         bisect_mod.KSFT_SKIP)
+        self.assertEqual(
+            bisect_mod.exit_code_from_cell_result({"verdict": "boot-timeout"}), bisect_mod.KSFT_SKIP
+        )
 
     def test_all_skip_verdicts_are_untestable(self):
-        for v in ("skip:no-kvm", "skip:stats-unavailable",
-                  "skip:image-not-warm", "skip:no-lkdtm",
-                  "skip:fixture-missing"):
-            self.assertEqual(bisect_mod.exit_code_from_cell_result({"verdict": v}),
-                             bisect_mod.KSFT_SKIP, f"{v} should map to 125")
+        for v in (
+            "skip:no-kvm",
+            "skip:stats-unavailable",
+            "skip:image-not-warm",
+            "skip:no-lkdtm",
+            "skip:fixture-missing",
+        ):
+            self.assertEqual(
+                bisect_mod.exit_code_from_cell_result({"verdict": v}),
+                bisect_mod.KSFT_SKIP,
+                f"{v} should map to 125",
+            )
 
     def test_harness_error_aborts(self):
         for v in ("harness-error", "aborted", "no-dmesg"):
-            self.assertEqual(bisect_mod.exit_code_from_cell_result({"verdict": v}),
-                             bisect_mod.KSFT_ABORT, f"{v} should abort")
+            self.assertEqual(
+                bisect_mod.exit_code_from_cell_result({"verdict": v}),
+                bisect_mod.KSFT_ABORT,
+                f"{v} should abort",
+            )
 
     def test_bundle_error_aborts_regardless_of_verdict(self):
         self.assertEqual(
@@ -1766,8 +2077,7 @@ class BisectExitCodeMappingTests(unittest.TestCase):
         )
 
     def test_missing_verdict_aborts(self):
-        self.assertEqual(bisect_mod.exit_code_from_cell_result({}),
-                         bisect_mod.KSFT_ABORT)
+        self.assertEqual(bisect_mod.exit_code_from_cell_result({}), bisect_mod.KSFT_ABORT)
 
 
 if __name__ == "__main__":

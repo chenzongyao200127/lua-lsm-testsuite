@@ -35,10 +35,10 @@ class RunRegistry:
     """
 
     def __init__(self) -> None:
-        self._handles: dict[str, "qemu.QemuHandle"] = {}
+        self._handles: dict[str, qemu.QemuHandle] = {}
         self._lock = threading.Lock()
 
-    def register(self, cell_id: str, handle: "qemu.QemuHandle") -> None:
+    def register(self, cell_id: str, handle: qemu.QemuHandle) -> None:
         with self._lock:
             self._handles[cell_id] = handle
 
@@ -58,6 +58,7 @@ class RunRegistry:
         prevent the matrix from finalising.
         """
         from . import qemu  # local import to avoid cycle.
+
         with self._lock:
             handles = list(self._handles.items())
             self._handles.clear()

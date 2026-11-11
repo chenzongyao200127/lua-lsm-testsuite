@@ -20,7 +20,7 @@ The document shape matches the de facto JUnit dialect (Jenkins/GitLab):
 
 from __future__ import annotations
 
-from typing import Iterable, Mapping
+from collections.abc import Iterable, Mapping
 from xml.etree import ElementTree as ET
 
 from . import schemas
@@ -38,42 +38,67 @@ def emit_junit(matrix: Mapping[str, object]) -> str:
 
     suite_name = str(matrix.get("name") or "matrix")
     total = len(cells)
-    failures = sum(1 for c in cells
-                   if _verdict_class(c.get("verdict") if isinstance(c.get("verdict"), str) else None) == "fail")
-    skipped = sum(1 for c in cells
-                  if _verdict_class(c.get("verdict") if isinstance(c.get("verdict"), str) else None) == "skip")
+    failures = sum(
+        1
+        for c in cells
+        if _verdict_class(c.get("verdict") if isinstance(c.get("verdict"), str) else None) == "fail"
+    )
+    skipped = sum(
+        1
+        for c in cells
+        if _verdict_class(c.get("verdict") if isinstance(c.get("verdict"), str) else None) == "skip"
+    )
 
-    root = ET.Element("testsuites", {
-        "name": suite_name,
-        "tests": str(total),
-        "failures": str(failures),
-        "skipped": str(skipped),
-    })
-    suite = ET.SubElement(root, "testsuite", {
-        "name": suite_name,
-        "tests": str(total),
-        "failures": str(failures),
-        "skipped": str(skipped),
-    })
+    root = ET.Element(
+        "testsuites",
+        {
+            "name": suite_name,
+            "tests": str(total),
+            "failures": str(failures),
+            "skipped": str(skipped),
+        },
+    )
+    suite = ET.SubElement(
+        root,
+        "testsuite",
+        {
+            "name": suite_name,
+            "tests": str(total),
+            "failures": str(failures),
+            "skipped": str(skipped),
+        },
+    )
 
     for cell in cells:
         cell_id = str(cell.get("cell_id", ""))
         verdict = cell.get("verdict") if isinstance(cell.get("verdict"), str) else None
         klass = _verdict_class(verdict)
-        case = ET.SubElement(suite, "testcase", {
-            "classname": suite_name,
-            "name": cell_id,
-        })
+        case = ET.SubElement(
+            suite,
+            "testcase",
+            {
+                "classname": suite_name,
+                "name": cell_id,
+            },
+        )
         if klass == "fail":
             v = verdict or "no-verdict"
-            ET.SubElement(case, "failure", {
-                "type": v,
-                "message": f"verdict: {v}",
-            })
+            ET.SubElement(
+                case,
+                "failure",
+                {
+                    "type": v,
+                    "message": f"verdict: {v}",
+                },
+            )
         elif klass == "skip":
-            ET.SubElement(case, "skipped", {
-                "message": str(verdict) if verdict else "unknown",
-            })
+            ET.SubElement(
+                case,
+                "skipped",
+                {
+                    "message": str(verdict) if verdict else "unknown",
+                },
+            )
 
     ET.indent(root, space="  ")
     return '<?xml version="1.0" encoding="UTF-8"?>\n' + ET.tostring(root, encoding="unicode") + "\n"

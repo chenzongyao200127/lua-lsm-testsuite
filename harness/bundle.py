@@ -35,9 +35,9 @@ import os
 import shutil
 import subprocess
 import threading
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Iterable, Mapping, Sequence
 
 from . import schemas
 
@@ -96,8 +96,7 @@ def _git_head_sha(tree: Path) -> str | None:
         r = subprocess.run(
             ["git", "rev-parse", "HEAD"],
             cwd=str(tree),
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            capture_output=True,
             timeout=10,
         )
         if r.returncode == 0:
@@ -126,8 +125,7 @@ def _diff_configs(current: Path | None, baseline: Path | None) -> str:
     try:
         r = subprocess.run(
             ["diff", "-u", str(baseline), str(current)],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            capture_output=True,
             timeout=15,
         )
     except (OSError, subprocess.TimeoutExpired) as e:
@@ -135,8 +133,9 @@ def _diff_configs(current: Path | None, baseline: Path | None) -> str:
     return r.stdout.decode("utf-8", errors="replace")
 
 
-def _decode_trace(decode_script: Path | None, kernel_tree: Path | None,
-                  splat_slice: Sequence[str]) -> str:
+def _decode_trace(
+    decode_script: Path | None, kernel_tree: Path | None, splat_slice: Sequence[str]
+) -> str:
     """Run scripts/decode_stacktrace.sh on the splat slice; return its output.
 
     On any failure (script missing, exec error, non-zero exit) the returned
@@ -155,15 +154,11 @@ def _decode_trace(decode_script: Path | None, kernel_tree: Path | None,
             [str(decode_script), "vmlinux"],
             cwd=str(kernel_tree),
             input=text.encode("utf-8"),
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            capture_output=True,
             timeout=60,
         )
     except (OSError, subprocess.TimeoutExpired) as e:
-        return (
-            f"# decode failed: {type(e).__name__}: {e}\n"
-            f"# raw splat slice follows\n{text}"
-        )
+        return f"# decode failed: {type(e).__name__}: {e}\n# raw splat slice follows\n{text}"
     if r.returncode != 0:
         stderr = r.stderr.decode("utf-8", errors="replace")
         stdout = r.stdout.decode("utf-8", errors="replace")
@@ -176,8 +171,9 @@ def _decode_trace(decode_script: Path | None, kernel_tree: Path | None,
     return r.stdout.decode("utf-8", errors="replace") or text
 
 
-def _write_payload(bundle_dir: Path, sources: BundleSources, signature_sha1: str,
-                   signature_kind: str) -> None:
+def _write_payload(
+    bundle_dir: Path, sources: BundleSources, signature_sha1: str, signature_kind: str
+) -> None:
     bundle_dir.mkdir(parents=True, exist_ok=True)
 
     # kernel.sha: git HEAD of the kernel tree, or "unknown" marker.

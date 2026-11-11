@@ -8,9 +8,9 @@ A "hit" is recorded as {pattern, line, substring} where:
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Iterator
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Iterable, Iterator
 
 from .classifier_patterns import PATTERN_VERSION, PATTERNS
 

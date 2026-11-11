@@ -9,9 +9,10 @@ never imports back. cell_runner re-exports these names, so historical
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Mapping
+from typing import Any, Callable
 
 from . import ssh
 
@@ -40,7 +41,7 @@ class CellContext:
         """
         self.commands.append(cmd)
 
-    def with_profile(self, **overrides: Any) -> "CellContext":
+    def with_profile(self, **overrides: Any) -> CellContext:
         """Return a copy sharing commands/artifact_dir with a patched profile.
 
         Used by composite workloads (bench-short's paired load/unload) that

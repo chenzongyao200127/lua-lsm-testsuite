@@ -6,25 +6,33 @@ from harness import bisect
 class BisectTests(unittest.TestCase):
     def test_all_pass_is_zero(self):
         self.assertEqual(
-            bisect.exit_code_from_totals({"executed": 4, "passed": 4, "failed": 0, "skipped": 0, "aborted": 0}),
+            bisect.exit_code_from_totals(
+                {"executed": 4, "passed": 4, "failed": 0, "skipped": 0, "aborted": 0}
+            ),
             0,
         )
 
     def test_any_fail_is_one(self):
         self.assertEqual(
-            bisect.exit_code_from_totals({"executed": 4, "passed": 3, "failed": 1, "skipped": 0, "aborted": 0}),
+            bisect.exit_code_from_totals(
+                {"executed": 4, "passed": 3, "failed": 1, "skipped": 0, "aborted": 0}
+            ),
             1,
         )
 
     def test_aborted_treated_as_fail(self):
         self.assertEqual(
-            bisect.exit_code_from_totals({"executed": 4, "passed": 3, "failed": 0, "skipped": 0, "aborted": 1}),
+            bisect.exit_code_from_totals(
+                {"executed": 4, "passed": 3, "failed": 0, "skipped": 0, "aborted": 1}
+            ),
             1,
         )
 
     def test_all_skip_is_125(self):
         self.assertEqual(
-            bisect.exit_code_from_totals({"executed": 4, "passed": 0, "failed": 0, "skipped": 4, "aborted": 0}),
+            bisect.exit_code_from_totals(
+                {"executed": 4, "passed": 0, "failed": 0, "skipped": 4, "aborted": 0}
+            ),
             125,
         )
 
@@ -37,7 +45,9 @@ class BisectTests(unittest.TestCase):
     def test_partial_skip_with_pass_is_zero(self):
         # Non-trivial signal: 3 cells passed and 1 skipped -> bisect treats commit as good.
         self.assertEqual(
-            bisect.exit_code_from_totals({"executed": 4, "passed": 3, "failed": 0, "skipped": 1, "aborted": 0}),
+            bisect.exit_code_from_totals(
+                {"executed": 4, "passed": 3, "failed": 0, "skipped": 1, "aborted": 0}
+            ),
             0,
         )
 

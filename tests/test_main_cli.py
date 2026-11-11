@@ -18,7 +18,7 @@ from unittest import mock
 from unittest.mock import MagicMock, patch
 
 from harness import __main__ as cli
-from harness import bisect, cell_runner, hostenv, matrix, qemu, ssh
+from harness import bisect, cell_runner, hostenv, qemu, ssh
 
 
 def _fake_handle() -> qemu.QemuHandle:
@@ -43,8 +43,11 @@ class _PatchHostEnv:
     """Force hostenv.detect() to report Linux+KVM regardless of the test host."""
 
     def __enter__(self):
-        self._patch = patch.object(hostenv, "detect", return_value=hostenv.HostEnv(
-            system="Linux", release="6.10.0", has_kvm=True))
+        self._patch = patch.object(
+            hostenv,
+            "detect",
+            return_value=hostenv.HostEnv(system="Linux", release="6.10.0", has_kvm=True),
+        )
         self._patch.start()
         return self
 
@@ -59,8 +62,7 @@ class PolicyPathTests(unittest.TestCase):
             paths = cli._resolve_policy_paths(share_dir, "smoke", "functional")
             self.assertEqual(
                 paths,
-                (share_dir / "lua-lsm-testsuite" / "fixtures" / "policies"
-                 / "smoke.lua",),
+                (share_dir / "lua-lsm-testsuite" / "fixtures" / "policies" / "smoke.lua",),
             )
 
 
@@ -75,18 +77,26 @@ class CliRunTests(unittest.TestCase):
             tdp = Path(td)
             args = [
                 "run",
-                "--workload", "smoke",
-                "--kind", "bughunt",
+                "--workload",
+                "smoke",
+                "--kind",
+                "bughunt",
                 "--no-kvm",
-                "--ssh-key", "/dev/null",
-                "--launcher", "/nonexistent/launcher.sh",
-                "--runs-root", str(tdp / "runs"),
-                "--boot-timeout", "1.0",
+                "--ssh-key",
+                "/dev/null",
+                "--launcher",
+                "/nonexistent/launcher.sh",
+                "--runs-root",
+                str(tdp / "runs"),
+                "--boot-timeout",
+                "1.0",
             ]
-            with _PatchHostEnv(), \
-                 patch.object(qemu, "spawn", side_effect=qemu.QemuLaunchError("missing")), \
-                 patch.object(ssh, "wait_for_ssh", return_value=False), \
-                 patch.object(ssh, "run", side_effect=_fake_ssh_run):
+            with (
+                _PatchHostEnv(),
+                patch.object(qemu, "spawn", side_effect=qemu.QemuLaunchError("missing")),
+                patch.object(ssh, "wait_for_ssh", return_value=False),
+                patch.object(ssh, "run", side_effect=_fake_ssh_run),
+            ):
                 # KVM not required, so the runner should still spawn (and our
                 # mock raises). The cell.json must land regardless.
                 rc = cli.main(args)
@@ -94,8 +104,10 @@ class CliRunTests(unittest.TestCase):
             cell_dirs = list((tdp / "runs").glob("*"))
             self.assertEqual(len(cell_dirs), 1)
             cell_dir = cell_dirs[0]
-            self.assertTrue((cell_dir / "cell.json").exists(),
-                            "cell.json must be written before any boot attempt")
+            self.assertTrue(
+                (cell_dir / "cell.json").exists(),
+                "cell.json must be written before any boot attempt",
+            )
             cell_json = json.loads((cell_dir / "cell.json").read_text())
             self.assertEqual(cell_json["workload"], "smoke")
 
@@ -104,23 +116,31 @@ class CliRunTests(unittest.TestCase):
             tdp = Path(td)
             args = [
                 "run",
-                "--workload", "smoke",
-                "--kind", "bughunt",
+                "--workload",
+                "smoke",
+                "--kind",
+                "bughunt",
                 "--no-kvm",
-                "--ssh-key", "/dev/null",
-                "--launcher", "/nonexistent/launcher.sh",
-                "--runs-root", str(tdp / "runs"),
-                "--boot-timeout", "1.0",
+                "--ssh-key",
+                "/dev/null",
+                "--launcher",
+                "/nonexistent/launcher.sh",
+                "--runs-root",
+                str(tdp / "runs"),
+                "--boot-timeout",
+                "1.0",
             ]
-            with _PatchHostEnv(), \
-                 patch.object(qemu, "spawn", return_value=_fake_handle()), \
-                 patch.object(qemu, "stop", return_value=0), \
-                 patch.object(ssh, "wait_for_ssh", return_value=True), \
-                 patch.object(ssh, "run", side_effect=_fake_ssh_run), \
-                 patch.object(ssh, "fetch_text", return_value=None):
+            with (
+                _PatchHostEnv(),
+                patch.object(qemu, "spawn", return_value=_fake_handle()),
+                patch.object(qemu, "stop", return_value=0),
+                patch.object(ssh, "wait_for_ssh", return_value=True),
+                patch.object(ssh, "run", side_effect=_fake_ssh_run),
+                patch.object(ssh, "fetch_text", return_value=None),
+            ):
                 # Make the runner write a serial.log (would normally be QEMU's
                 # job) so classifier has *something* to inspect.
-                rc_pre = cli.KSFT_PASS  # placeholder
+
                 # Stage a non-empty serial.log into each prospective dir BEFORE
                 # the runner starts: simplest is to monkey-patch qemu.spawn
                 # to write the log itself.
@@ -136,8 +156,11 @@ class CliRunTests(unittest.TestCase):
             self.assertEqual(len(cell_dirs), 1)
             result = json.loads((cell_dirs[0] / "result.json").read_text())
             self.assertEqual(result["verdict"], "pass")
-            self.assertGreaterEqual(len(result.get("commands") or []), 1,
-                                    "result.json must list the guest commands the workload ran")
+            self.assertGreaterEqual(
+                len(result.get("commands") or []),
+                1,
+                "result.json must list the guest commands the workload ran",
+            )
 
 
 class CliMatrixTests(unittest.TestCase):
@@ -150,12 +173,17 @@ class CliMatrixTests(unittest.TestCase):
             (tdp / "kernel" / "linux").mkdir(parents=True)
             # lua-lsm-tools is missing -> assert_share_dir refuses.
             with _PatchHostEnv():
-                rc = cli.main([
-                    "matrix",
-                    "--config", str(self._smoke_config()),
-                    "--share-dir", str(tdp),
-                    "--runs-root", str(tdp / "runs"),
-                ])
+                rc = cli.main(
+                    [
+                        "matrix",
+                        "--config",
+                        str(self._smoke_config()),
+                        "--share-dir",
+                        str(tdp),
+                        "--runs-root",
+                        str(tdp / "runs"),
+                    ]
+                )
             self.assertEqual(rc, cli.KSFT_FAIL)
 
     def test_matrix_dispatches_each_cell_with_distinct_port(self):
@@ -181,12 +209,18 @@ class CliMatrixTests(unittest.TestCase):
 
             args = [
                 "matrix",
-                "--config", str(self._smoke_config()),
-                "--ssh-key", "/dev/null",
-                "--launcher", "/nonexistent/launcher.sh",
-                "--runs-root", str(tdp / "runs"),
-                "--port-base", "11000",
-                "--parallel", "1",
+                "--config",
+                str(self._smoke_config()),
+                "--ssh-key",
+                "/dev/null",
+                "--launcher",
+                "/nonexistent/launcher.sh",
+                "--runs-root",
+                str(tdp / "runs"),
+                "--port-base",
+                "11000",
+                "--parallel",
+                "1",
             ]
             with _PatchHostEnv(), patch.object(cell_runner, "run_cell", side_effect=_stub_run_cell):
                 rc = cli.main(args)
@@ -221,11 +255,16 @@ class CliMatrixTests(unittest.TestCase):
 
             args = [
                 "bisect-run",
-                "--config", str(self._smoke_config()),
-                "--ssh-key", "/dev/null",
-                "--launcher", "/nonexistent/launcher.sh",
-                "--runs-root", str(tdp / "runs"),
-                "--port-base", "12000",
+                "--config",
+                str(self._smoke_config()),
+                "--ssh-key",
+                "/dev/null",
+                "--launcher",
+                "/nonexistent/launcher.sh",
+                "--runs-root",
+                str(tdp / "runs"),
+                "--port-base",
+                "12000",
             ]
             with _PatchHostEnv(), patch.object(cell_runner, "run_cell", side_effect=_stub_run_cell):
                 rc = cli.main(args)
@@ -253,11 +292,16 @@ class CliMatrixTests(unittest.TestCase):
 
             args = [
                 "bisect-run",
-                "--config", str(self._smoke_config()),
-                "--ssh-key", "/dev/null",
-                "--launcher", "/nonexistent/launcher.sh",
-                "--runs-root", str(tdp / "runs"),
-                "--port-base", "13000",
+                "--config",
+                str(self._smoke_config()),
+                "--ssh-key",
+                "/dev/null",
+                "--launcher",
+                "/nonexistent/launcher.sh",
+                "--runs-root",
+                str(tdp / "runs"),
+                "--port-base",
+                "13000",
             ]
             with _PatchHostEnv(), patch.object(cell_runner, "run_cell", side_effect=_stub_run_cell):
                 rc = cli.main(args)
@@ -307,14 +351,20 @@ class CliNoKvmEnvOverrideTests(unittest.TestCase):
             tdp = Path(td)
             args = [
                 "run",
-                "--workload", "smoke",
-                "--kind", "bughunt",
+                "--workload",
+                "smoke",
+                "--kind",
+                "bughunt",
                 # Deliberately NOT passing --no-kvm: kvm_required stays True,
                 # so this exercises the real AC-9 skip:no-kvm branch.
-                "--ssh-key", "/dev/null",
-                "--launcher", "/nonexistent/launcher.sh",
-                "--runs-root", str(tdp / "runs"),
-                "--boot-timeout", "1.0",
+                "--ssh-key",
+                "/dev/null",
+                "--launcher",
+                "/nonexistent/launcher.sh",
+                "--runs-root",
+                str(tdp / "runs"),
+                "--boot-timeout",
+                "1.0",
             ]
 
             def _fail_if_called(*a, **kw):
@@ -328,10 +378,12 @@ class CliNoKvmEnvOverrideTests(unittest.TestCase):
             # _enforce_supported_host) AND the copy imported into
             # cell_runner.run_cell at import time. Both must honor the env
             # var via the real detect() forwarder above.
-            with mock.patch.dict(os.environ, env_patch, clear=False), \
-                 patch.object(hostenv, "detect", side_effect=_detect_linux_honoring_env), \
-                 patch.object(cell_runner, "detect", side_effect=_detect_linux_honoring_env), \
-                 patch.object(qemu, "spawn", side_effect=_fail_if_called):
+            with (
+                mock.patch.dict(os.environ, env_patch, clear=False),
+                patch.object(hostenv, "detect", side_effect=_detect_linux_honoring_env),
+                patch.object(cell_runner, "detect", side_effect=_detect_linux_honoring_env),
+                patch.object(qemu, "spawn", side_effect=_fail_if_called),
+            ):
                 cli.main(args)
 
             cell_dirs = list((tdp / "runs").glob("*"))
@@ -357,12 +409,18 @@ class CliNoKvmEnvOverrideTests(unittest.TestCase):
             tdp = Path(td)
             args = [
                 "run",
-                "--workload", "smoke",
-                "--kind", "bughunt",
-                "--ssh-key", "/dev/null",
-                "--launcher", "/nonexistent/launcher.sh",
-                "--runs-root", str(tdp / "runs"),
-                "--boot-timeout", "1.0",
+                "--workload",
+                "smoke",
+                "--kind",
+                "bughunt",
+                "--ssh-key",
+                "/dev/null",
+                "--launcher",
+                "/nonexistent/launcher.sh",
+                "--runs-root",
+                str(tdp / "runs"),
+                "--boot-timeout",
+                "1.0",
             ]
             spawn_called = {"v": False}
 
@@ -373,15 +431,19 @@ class CliNoKvmEnvOverrideTests(unittest.TestCase):
             # Ensure the env var is NOT set during this test even if the
             # caller's env happens to define it.
             env_strip = {k: v for k, v in os.environ.items() if k != hostenv.KVM_PATH_ENV}
-            with mock.patch.dict(os.environ, env_strip, clear=True), \
-                 patch.object(hostenv, "detect", side_effect=_detect_linux_with_kvm), \
-                 patch.object(cell_runner, "detect", side_effect=_detect_linux_with_kvm), \
-                 patch.object(qemu, "spawn", side_effect=_record_and_fail), \
-                 patch.object(ssh, "wait_for_ssh", return_value=False), \
-                 patch.object(ssh, "run", side_effect=_fake_ssh_run):
+            with (
+                mock.patch.dict(os.environ, env_strip, clear=True),
+                patch.object(hostenv, "detect", side_effect=_detect_linux_with_kvm),
+                patch.object(cell_runner, "detect", side_effect=_detect_linux_with_kvm),
+                patch.object(qemu, "spawn", side_effect=_record_and_fail),
+                patch.object(ssh, "wait_for_ssh", return_value=False),
+                patch.object(ssh, "run", side_effect=_fake_ssh_run),
+            ):
                 cli.main(args)
-            self.assertTrue(spawn_called["v"],
-                            "without env override + with KVM present, the runner must reach qemu.spawn")
+            self.assertTrue(
+                spawn_called["v"],
+                "without env override + with KVM present, the runner must reach qemu.spawn",
+            )
 
 
 class CliHostRefusalTests(unittest.TestCase):
@@ -390,17 +452,27 @@ class CliHostRefusalTests(unittest.TestCase):
             tdp = Path(td)
             args = [
                 "run",
-                "--workload", "smoke",
-                "--kind", "bughunt",
+                "--workload",
+                "smoke",
+                "--kind",
+                "bughunt",
                 "--no-kvm",
-                "--ssh-key", "/dev/null",
-                "--launcher", "/nonexistent/launcher.sh",
-                "--runs-root", str(tdp / "runs"),
+                "--ssh-key",
+                "/dev/null",
+                "--launcher",
+                "/nonexistent/launcher.sh",
+                "--runs-root",
+                str(tdp / "runs"),
             ]
-            with patch.object(hostenv, "detect", return_value=hostenv.HostEnv(
-                    system="Darwin", release="25.3.0", has_kvm=False)):
-                with self.assertRaises(hostenv.UnsupportedHostError):
-                    cli.main(args)
+            with (
+                patch.object(
+                    hostenv,
+                    "detect",
+                    return_value=hostenv.HostEnv(system="Darwin", release="25.3.0", has_kvm=False),
+                ),
+                self.assertRaises(hostenv.UnsupportedHostError),
+            ):
+                cli.main(args)
 
 
 if __name__ == "__main__":

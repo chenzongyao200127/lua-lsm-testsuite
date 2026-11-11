@@ -13,14 +13,15 @@ via process group on stop.
 
 from __future__ import annotations
 
+import contextlib
 import os
 import shlex
 import signal
 import subprocess
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Mapping
 
 
 class QemuLaunchError(RuntimeError):
@@ -111,17 +112,13 @@ def stop(handle: QemuHandle, timeout_s: float = 10.0) -> int:
     Safe to call when the launcher has already exited.
     """
     if handle.proc.poll() is None:
-        try:
+        with contextlib.suppress(ProcessLookupError):
             os.killpg(handle.pgid, signal.SIGTERM)
-        except ProcessLookupError:
-            pass
         try:
             handle.proc.wait(timeout=timeout_s)
         except subprocess.TimeoutExpired:
-            try:
+            with contextlib.suppress(ProcessLookupError):
                 os.killpg(handle.pgid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
             handle.proc.wait(timeout=5.0)
     return handle.proc.returncode if handle.proc.returncode is not None else -1
 

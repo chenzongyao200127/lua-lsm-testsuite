@@ -19,7 +19,9 @@ from typing import Any
 LKDTM_PROVOKE_RC = 77  # by convention, matches the workload short-circuit
 
 
-def adjust_verdict_for_lkdtm(result: dict[str, Any], workload_returncode: int | None) -> dict[str, Any]:
+def adjust_verdict_for_lkdtm(
+    result: dict[str, Any], workload_returncode: int | None
+) -> dict[str, Any]:
     """Invert the cell's verdict for LKDTM positive-control semantics.
 
     Parameters:

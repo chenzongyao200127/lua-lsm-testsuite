@@ -11,8 +11,7 @@ class WorkloadRegistryTests(unittest.TestCase):
     def test_registry_known_workloads(self):
         self.assertEqual(
             set(workloads.REGISTRY),
-            {"functional", "smoke", "bench", "bench-short", "unixbench",
-             "verify-cleanup", "lkdtm"},
+            {"functional", "smoke", "bench", "bench-short", "unixbench", "verify-cleanup", "lkdtm"},
         )
 
     def test_bench_short_is_bounded_alias_of_bench(self):
@@ -23,8 +22,9 @@ class WorkloadRegistryTests(unittest.TestCase):
             ctx = CellContext(
                 cell_id="c1",
                 artifact_dir=art,
-                target=ssh.SshTarget(host="127.0.0.1", port=10023, user="root",
-                                     key_path=Path("/dev/null")),
+                target=ssh.SshTarget(
+                    host="127.0.0.1", port=10023, user="root", key_path=Path("/dev/null")
+                ),
                 profile={},
             )
             captured_timeouts: list[float] = []
@@ -54,7 +54,9 @@ class WorkloadInvocationTests(unittest.TestCase):
         return CellContext(
             cell_id="c1",
             artifact_dir=art,
-            target=ssh.SshTarget(host="127.0.0.1", port=10023, user="root", key_path=Path("/dev/null")),
+            target=ssh.SshTarget(
+                host="127.0.0.1", port=10023, user="root", key_path=Path("/dev/null")
+            ),
             profile=profile or {},
         )
 
@@ -82,9 +84,7 @@ class WorkloadInvocationTests(unittest.TestCase):
         with TemporaryDirectory() as td:
             art = Path(td)
             ctx = self._ctx(art, profile={"workload_timeout_s": 45})
-            fake_result = ssh.SshResult(
-                returncode=0, stdout="ok 9 - policy unloads\n", stderr=""
-            )
+            fake_result = ssh.SshResult(returncode=0, stdout="ok 9 - policy unloads\n", stderr="")
             with patch.object(ssh, "run", return_value=fake_result) as mock_run:
                 result = workloads.functional(ctx.target, ctx)
             self.assertEqual(result.name, "functional")
@@ -149,11 +149,10 @@ class WorkloadInvocationTests(unittest.TestCase):
             # writes three top-level files at -o and copies its latest
             # results-tree as a subdirectory with the UnixBench run-id.
             run_id = "unixbench-2026-05-27-001"
+
             def _fake_ssh(target, cmd, timeout_s=120.0):
                 (art / "system.txt").write_text("Linux 6.10 SELinux\n")
-                (art / "command.txt").write_text(
-                    "/mnt/host/unixbench/Run -c 1 -i 1\n"
-                )
+                (art / "command.txt").write_text("/mnt/host/unixbench/Run -c 1 -i 1\n")
                 (art / "unixbench.log").write_text("BYTE UNIX Benchmarks 5.1.3\n")
                 rd = art / run_id
                 rd.mkdir(parents=True, exist_ok=True)
@@ -175,11 +174,11 @@ class WorkloadInvocationTests(unittest.TestCase):
 
             # results/<run-id>/ holds the UnixBench result tree; the
             # wrapper's "raw" dir at <cell>/<run-id> is moved away.
-            self.assertFalse((art / run_id).exists(),
-                             "raw <cell>/<run-id> tree must be normalized away")
+            self.assertFalse(
+                (art / run_id).exists(), "raw <cell>/<run-id> tree must be normalized away"
+            )
             normalized = art / "results" / run_id
-            self.assertTrue(normalized.exists(),
-                            f"expected normalized result tree at {normalized}")
+            self.assertTrue(normalized.exists(), f"expected normalized result tree at {normalized}")
             self.assertTrue((normalized / "index.html").exists())
             self.assertTrue((normalized / "report-1.txt").exists())
 
@@ -260,8 +259,9 @@ class BenchUsesRealLuaContractTests(unittest.TestCase):
         return CellContext(
             cell_id="c1",
             artifact_dir=art,
-            target=ssh.SshTarget(host="127.0.0.1", port=10023, user="root",
-                                 key_path=Path("/dev/null")),
+            target=ssh.SshTarget(
+                host="127.0.0.1", port=10023, user="root", key_path=Path("/dev/null")
+            ),
             profile=profile or {},
         )
 
@@ -286,7 +286,8 @@ class BenchUsesRealLuaContractTests(unittest.TestCase):
                 r = workloads.bench_short(ctx.target, ctx)
             self.assertEqual(r.name, "bench-short")
             self.assertEqual(
-                len(ctx.commands), 2,
+                len(ctx.commands),
+                2,
                 "bench-short must issue exactly two commands: load + unload",
             )
             self.assertIn(" load ", ctx.commands[0])
@@ -302,10 +303,12 @@ class BenchUsesRealLuaContractTests(unittest.TestCase):
         surfaces the load failure (the real story), not the unload rc."""
         with TemporaryDirectory() as td:
             ctx = self._ctx(Path(td))
-            results = iter([
-                ssh.SshResult(returncode=1, stdout="", stderr="load failed"),
-                ssh.SshResult(returncode=0, stdout="", stderr=""),
-            ])
+            results = iter(
+                [
+                    ssh.SshResult(returncode=1, stdout="", stderr="load failed"),
+                    ssh.SshResult(returncode=0, stdout="", stderr=""),
+                ]
+            )
 
             def _seq(target, cmd, timeout_s=120.0):
                 return next(results)
@@ -329,8 +332,9 @@ class UnixBenchPolicyBracketTests(unittest.TestCase):
         return CellContext(
             cell_id="c1",
             artifact_dir=art,
-            target=ssh.SshTarget(host="127.0.0.1", port=10023, user="root",
-                                 key_path=Path("/dev/null")),
+            target=ssh.SshTarget(
+                host="127.0.0.1", port=10023, user="root", key_path=Path("/dev/null")
+            ),
             profile=profile or {},
         )
 
@@ -338,17 +342,16 @@ class UnixBenchPolicyBracketTests(unittest.TestCase):
         with TemporaryDirectory() as td:
             ctx = self._ctx(
                 Path(td),
-                profile={"guest_artifact_relpath": "runs/x/cell",
-                         "policy": "denyfile"},
+                profile={"guest_artifact_relpath": "runs/x/cell", "policy": "denyfile"},
             )
             fake = ssh.SshResult(returncode=0, stdout="", stderr="")
             with patch.object(ssh, "run", return_value=fake):
                 r = workloads.unixbench(ctx.target, ctx)
             self.assertEqual(r.returncode, 0)
             self.assertEqual(
-                len(ctx.commands), 3,
-                "unixbench must issue exactly three commands: "
-                "register + wrapper + unregister",
+                len(ctx.commands),
+                3,
+                "unixbench must issue exactly three commands: register + wrapper + unregister",
             )
             # Step 1: register denyfile.lua via securityfs.
             self.assertIn(
@@ -372,14 +375,15 @@ class UnixBenchPolicyBracketTests(unittest.TestCase):
         with TemporaryDirectory() as td:
             ctx = self._ctx(
                 Path(td),
-                profile={"guest_artifact_relpath": "runs/x/cell",
-                         "policy": "denyfile"},
+                profile={"guest_artifact_relpath": "runs/x/cell", "policy": "denyfile"},
             )
-            results = iter([
-                ssh.SshResult(returncode=0, stdout="", stderr=""),       # register
-                ssh.SshResult(returncode=2, stdout="", stderr="UB boom"),# wrapper
-                ssh.SshResult(returncode=0, stdout="", stderr=""),       # unregister
-            ])
+            results = iter(
+                [
+                    ssh.SshResult(returncode=0, stdout="", stderr=""),  # register
+                    ssh.SshResult(returncode=2, stdout="", stderr="UB boom"),  # wrapper
+                    ssh.SshResult(returncode=0, stdout="", stderr=""),  # unregister
+                ]
+            )
 
             def _seq(target, cmd, timeout_s=120.0):
                 return next(results)
@@ -402,13 +406,14 @@ class UnixBenchPolicyBracketTests(unittest.TestCase):
         with TemporaryDirectory() as td:
             ctx = self._ctx(
                 Path(td),
-                profile={"guest_artifact_relpath": "runs/x/cell",
-                         "policy": "denyfile"},
+                profile={"guest_artifact_relpath": "runs/x/cell", "policy": "denyfile"},
             )
-            results = iter([
-                ssh.SshResult(returncode=1, stdout="", stderr="EBUSY"),  # register
-                ssh.SshResult(returncode=0, stdout="", stderr=""),       # unregister
-            ])
+            results = iter(
+                [
+                    ssh.SshResult(returncode=1, stdout="", stderr="EBUSY"),  # register
+                    ssh.SshResult(returncode=0, stdout="", stderr=""),  # unregister
+                ]
+            )
 
             def _seq(target, cmd, timeout_s=120.0):
                 return next(results)
@@ -431,24 +436,29 @@ class UnixBenchPolicyBracketTests(unittest.TestCase):
         with TemporaryDirectory() as td:
             ctx = self._ctx(
                 Path(td),
-                profile={"guest_artifact_relpath": "runs/x/cell",
-                         "policy": "denyfile"},
+                profile={"guest_artifact_relpath": "runs/x/cell", "policy": "denyfile"},
             )
-            results = iter([
-                ssh.SshResult(returncode=7, stdout="", stderr="EBUSY"),     # register
-                ssh.SshResult(returncode=9, stdout="", stderr="ENOENT"),    # unregister
-            ])
+            results = iter(
+                [
+                    ssh.SshResult(returncode=7, stdout="", stderr="EBUSY"),  # register
+                    ssh.SshResult(returncode=9, stdout="", stderr="ENOENT"),  # unregister
+                ]
+            )
 
             def _seq(target, cmd, timeout_s=120.0):
                 return next(results)
 
             with patch.object(ssh, "run", side_effect=_seq):
                 r = workloads.unixbench(ctx.target, ctx)
-            self.assertEqual(len(ctx.commands), 2,
-                             "wrapper must remain skipped when register fails")
-            self.assertEqual(r.returncode, 7,
-                             "register failure (7) must be the cell rc, "
-                             "not the safety-net unregister failure (9)")
+            self.assertEqual(
+                len(ctx.commands), 2, "wrapper must remain skipped when register fails"
+            )
+            self.assertEqual(
+                r.returncode,
+                7,
+                "register failure (7) must be the cell rc, "
+                "not the safety-net unregister failure (9)",
+            )
             self.assertIn("register exited 7", r.notes or "")
 
 

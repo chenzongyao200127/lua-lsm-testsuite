@@ -11,7 +11,8 @@ json.dumps without custom encoders.
 
 from __future__ import annotations
 
-from typing import Any, Mapping
+from collections.abc import Mapping
+from typing import Any
 
 SCHEMA_VERSION = 1
 
@@ -39,8 +40,15 @@ VERDICTS = (
 # unixbench, etc.) returned a non-zero exit code but the kernel produced no
 # splat: the cell did not pass even though the kernel itself is healthy.
 FAIL_VERDICTS = frozenset(
-    {"kernel-bug", "no-dmesg", "boot-timeout", "aborted",
-     "workload-fail", "harness-error", "build-fail"}
+    {
+        "kernel-bug",
+        "no-dmesg",
+        "boot-timeout",
+        "aborted",
+        "workload-fail",
+        "harness-error",
+        "build-fail",
+    }
 )
 
 # Verdicts treated as TAP-level SKIP. With "stats-unavailable" renamed to
@@ -108,7 +116,9 @@ REQUIRED_COUNTER_KEYS: tuple[str, ...] = (
 LSM_FUNCS_ROW_KEYS: tuple[str, ...] = ("name", "nlsm", "count", "total", "average", "maxtime")
 
 
-def lsm_funcs_row(name: str, nlsm: int, count: int, total: int, average: int, maxtime: int) -> dict[str, Any]:
+def lsm_funcs_row(
+    name: str, nlsm: int, count: int, total: int, average: int, maxtime: int
+) -> dict[str, Any]:
     """Build an AC-5.1-shaped lsm_funcs row.
 
     Helpers consume the dict-keyed-by-name shape; this builder is provided for
@@ -168,13 +178,27 @@ def empty_matrix() -> dict[str, Any]:
         "finished_at": None,
         "host": {"system": None, "release": None, "has_kvm": None},
         "config": {"parallel": None, "matrix_path": None},
-        "totals": {"planned": 0, "executed": 0, "passed": 0, "failed": 0, "skipped": 0, "aborted": 0},
+        "totals": {
+            "planned": 0,
+            "executed": 0,
+            "passed": 0,
+            "failed": 0,
+            "skipped": 0,
+            "aborted": 0,
+        },
         "cells": [],
     }
 
 
 def aggregate_totals(cells: list[Mapping[str, Any]]) -> dict[str, int]:
-    totals = {"planned": len(cells), "executed": 0, "passed": 0, "failed": 0, "skipped": 0, "aborted": 0}
+    totals = {
+        "planned": len(cells),
+        "executed": 0,
+        "passed": 0,
+        "failed": 0,
+        "skipped": 0,
+        "aborted": 0,
+    }
     for c in cells:
         verdict = c.get("verdict")
         if verdict is None:
@@ -257,9 +281,7 @@ def assert_kconfig_profile(profile: str | None) -> None:
         return
     if profile not in VALID_KCONFIG_PROFILES:
         valid = ", ".join(sorted(VALID_KCONFIG_PROFILES))
-        raise KconfigProfileError(
-            f"unknown kconfig profile {profile!r}; valid choices: {valid}"
-        )
+        raise KconfigProfileError(f"unknown kconfig profile {profile!r}; valid choices: {valid}")
 
 
 def empty_bundle_metadata(cell_id: str, signature_sha1: str, signature_kind: str) -> dict[str, Any]:

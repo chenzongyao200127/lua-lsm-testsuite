@@ -17,13 +17,24 @@ import hashlib
 import json
 import shlex
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 
 from . import (
-    bundle, classifier, classifier_patterns, lkdtm_cell, perf_snapshot,
-    preflight, qemu, run_registry, schemas, signature, ssh, workloads,
+    bundle,
+    classifier,
+    classifier_patterns,
+    lkdtm_cell,
+    perf_snapshot,
+    preflight,
+    qemu,
+    run_registry,
+    schemas,
+    signature,
+    ssh,
+    workloads,
 )
 from .celltypes import CellContext, WorkloadFn, WorkloadResult
 from .cmdline import compose_env
@@ -125,7 +136,9 @@ def _maybe_snapshot(target: ssh.SshTarget) -> perf_snapshot.Snapshot | None:
     return snap
 
 
-def _perf_snapshot_strict(target: ssh.SshTarget) -> tuple[perf_snapshot.Snapshot | None, str | None]:
+def _perf_snapshot_strict(
+    target: ssh.SshTarget,
+) -> tuple[perf_snapshot.Snapshot | None, str | None]:
     """Perf-cell snapshot: BOTH stats and lsm_funcs are required AND must
     parse to a structurally complete `Snapshot`.
 
@@ -165,8 +178,9 @@ def _fetch_perf_texts(target: ssh.SshTarget) -> tuple[str | None, str | None]:
 # to the workload function itself.
 
 
-def _check_workload_fixture(target: ssh.SshTarget, workload_name: str,
-                            policy_path: str | None = None) -> Mapping[str, str] | None:
+def _check_workload_fixture(
+    target: ssh.SshTarget, workload_name: str, policy_path: str | None = None
+) -> Mapping[str, str] | None:
     """Verify the workload's host_share fixtures are readable in the guest.
 
     Returns a SKIP payload when a fixture is missing, None when all are
@@ -196,8 +210,9 @@ def _check_workload_fixture(target: ssh.SshTarget, workload_name: str,
     return None
 
 
-def _derive_guest_relpath(artifact_dir: Path, workspace_root: Path | None,
-                          override: str | None) -> str | None:
+def _derive_guest_relpath(
+    artifact_dir: Path, workspace_root: Path | None, override: str | None
+) -> str | None:
     if override is not None:
         return override
     if workspace_root is None:
@@ -328,7 +343,9 @@ def run_cell(inputs: CellInputs, host: HostEnv | None = None) -> dict[str, Any]:
     try:
         try:
             handle = qemu.spawn(
-                inputs.launcher, env, art / "serial.log",
+                inputs.launcher,
+                env,
+                art / "serial.log",
                 interactive=inputs.interactive,
             )
         except qemu.QemuLaunchError as e:
@@ -362,9 +379,12 @@ def run_cell(inputs: CellInputs, host: HostEnv | None = None) -> dict[str, Any]:
         policy_guest_path: str | None = None
         if profile.get("policy"):
             policy_guest_path = workloads.policy_guest_path(
-                inputs.workload_name, str(profile["policy"]))
+                inputs.workload_name, str(profile["policy"])
+            )
         fixture_skip = _check_workload_fixture(
-            inputs.ssh_target, inputs.workload_name, policy_path=policy_guest_path,
+            inputs.ssh_target,
+            inputs.workload_name,
+            policy_path=policy_guest_path,
         )
         if fixture_skip is not None:
             result["verdict"] = str(fixture_skip["verdict"])
@@ -449,7 +469,11 @@ def run_cell(inputs: CellInputs, host: HostEnv | None = None) -> dict[str, Any]:
             (art / "journalctl-kb.txt").write_text(journal_text)
 
         return _classify_and_finalize(
-            result, art, inputs, ctx, workload_returncode,
+            result,
+            art,
+            inputs,
+            ctx,
+            workload_returncode,
             perf_after_skip=perf_after_skip,
         )
     finally:
@@ -471,7 +495,10 @@ def _persist_snapshot(art: Path, label: str, snap: perf_snapshot.Snapshot) -> No
     counters_text = "\n".join(f"{k}\t=\t{v}" for k, v in sorted(snap.counters.items())) + "\n"
     _write_text(art / f"stats-{label}.txt", counters_text)
     funcs_text = "stats for lua-lsm (ns)\n"
-    funcs_text += "num name                         nlsm        count           total    average      maxtime\n"
+    funcs_text += (
+        "num name                         nlsm        "
+        "count           total    average      maxtime\n"
+    )
     funcs_text += "----\n"
     for i, (name, row) in enumerate(sorted(snap.lsm_funcs.items()), start=1):
         funcs_text += (
@@ -482,11 +509,14 @@ def _persist_snapshot(art: Path, label: str, snap: perf_snapshot.Snapshot) -> No
     _write_text(art / f"lsm_funcs-{label}.txt", funcs_text)
 
 
-def _classify_and_finalize(result: dict[str, Any], art: Path,
-                           inputs: CellInputs, ctx: CellContext,
-                           workload_returncode: int | None,
-                           perf_after_skip: tuple[str, str] | None = None,
-                           ) -> dict[str, Any]:
+def _classify_and_finalize(
+    result: dict[str, Any],
+    art: Path,
+    inputs: CellInputs,
+    ctx: CellContext,
+    workload_returncode: int | None,
+    perf_after_skip: tuple[str, str] | None = None,
+) -> dict[str, Any]:
     serial_log = art / "serial.log"
     dmesg_log = art / "dmesg.log"
     serial_has_text = serial_log.exists() and serial_log.stat().st_size > 0
@@ -496,9 +526,11 @@ def _classify_and_finalize(result: dict[str, Any], art: Path,
     # kernel built without CONFIG_LKDTM=y produces zero log bytes (the
     # provoke-crash node was never written to), and we want the SKIP verdict
     # rather than the no-dmesg failure verdict.
-    if (inputs.workload_name == "lkdtm"
-            and workload_returncode == lkdtm_cell.LKDTM_PROVOKE_RC
-            and result["verdict"] is None):
+    if (
+        inputs.workload_name == "lkdtm"
+        and workload_returncode == lkdtm_cell.LKDTM_PROVOKE_RC
+        and result["verdict"] is None
+    ):
         result["verdict"] = "skip:no-lkdtm"
         result["reason"] = "LKDTM provoke-crash node missing (CONFIG_LKDTM=n)"
         result["finished_at"] = _now_iso()
@@ -534,16 +566,17 @@ def _classify_and_finalize(result: dict[str, Any], art: Path,
     if result["verdict"] is None:
         if hits:
             result["verdict"] = "kernel-bug"
-        elif (workload_returncode is not None and workload_returncode != 0
-              and inputs.workload_name != "lkdtm"):
+        elif (
+            workload_returncode is not None
+            and workload_returncode != 0
+            and inputs.workload_name != "lkdtm"
+        ):
             # The workload returned non-zero but the kernel produced no
             # classifier hit -- a guest-side failure we surface as
             # workload-fail (distinct from kernel-bug).
             result["verdict"] = "workload-fail"
             if not result.get("reason"):
-                result["reason"] = (
-                    f"workload returned non-zero exit code: {workload_returncode}"
-                )
+                result["reason"] = f"workload returned non-zero exit code: {workload_returncode}"
         elif perf_after_skip is not None:
             # Perf cell ran to completion with no kernel/workload failure but
             # the after-snapshot was missing/malformed. Surface as
@@ -639,8 +672,7 @@ def _splat_slice_from_logs(art: Path, window: int = 50) -> list[str]:
     return lines[start:end]
 
 
-def _emit_bundle(result: dict[str, Any], art: Path,
-                 inputs: CellInputs) -> dict[str, str] | None:
+def _emit_bundle(result: dict[str, Any], art: Path, inputs: CellInputs) -> dict[str, str] | None:
     """Build a signature, write a bundle, and return metadata for result.json."""
     splat_slice = _splat_slice_from_logs(art, window=50)
     if not splat_slice:
@@ -660,7 +692,10 @@ def _emit_bundle(result: dict[str, Any], art: Path,
         splat_slice=tuple(splat_slice),
     )
     bundle_dir = bundle.write_bundle(
-        inputs.bundle_store, sources, sig.sha1, sig.kind,
+        inputs.bundle_store,
+        sources,
+        sig.sha1,
+        sig.kind,
     )
     return {
         "bundle_dir": str(bundle_dir),

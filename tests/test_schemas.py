@@ -22,8 +22,16 @@ from harness.schemas import (
 class SchemasTests(unittest.TestCase):
     def test_empty_result_required_fields(self):
         r = empty_result("c123")
-        for key in ("schema_version", "cell_id", "verdict", "classifier_hits",
-                    "perf", "artifacts", "host", "cmdline"):
+        for key in (
+            "schema_version",
+            "cell_id",
+            "verdict",
+            "classifier_hits",
+            "perf",
+            "artifacts",
+            "host",
+            "cmdline",
+        ):
             self.assertIn(key, r)
         self.assertEqual(r["schema_version"], SCHEMA_VERSION)
         self.assertEqual(r["cell_id"], "c123")
@@ -76,19 +84,27 @@ class SchemasTests(unittest.TestCase):
     def test_aggregate_verdict(self):
         self.assertEqual(aggregate_verdict({"executed": 0}), "no-cells")
         self.assertEqual(
-            aggregate_verdict({"executed": 3, "passed": 3, "failed": 0, "skipped": 0, "aborted": 0}),
+            aggregate_verdict(
+                {"executed": 3, "passed": 3, "failed": 0, "skipped": 0, "aborted": 0}
+            ),
             "pass",
         )
         self.assertEqual(
-            aggregate_verdict({"executed": 3, "passed": 2, "failed": 1, "skipped": 0, "aborted": 0}),
+            aggregate_verdict(
+                {"executed": 3, "passed": 2, "failed": 1, "skipped": 0, "aborted": 0}
+            ),
             "fail",
         )
         self.assertEqual(
-            aggregate_verdict({"executed": 2, "passed": 1, "failed": 0, "skipped": 0, "aborted": 1}),
+            aggregate_verdict(
+                {"executed": 2, "passed": 1, "failed": 0, "skipped": 0, "aborted": 1}
+            ),
             "fail",
         )
         self.assertEqual(
-            aggregate_verdict({"executed": 4, "passed": 0, "failed": 0, "skipped": 4, "aborted": 0}),
+            aggregate_verdict(
+                {"executed": 4, "passed": 0, "failed": 0, "skipped": 4, "aborted": 0}
+            ),
             "skip-all",
         )
 
@@ -101,10 +117,19 @@ class SchemasTests(unittest.TestCase):
         # AC-5.1: lvm.{nalloc,nfree,nusage}, lmem.{nalloc,nrealloc,nfree,total,
         # average,minimum,maximum}, kvcache.{nalloc,nfree,nusage}.
         expected = {
-            "lvm.nalloc", "lvm.nfree", "lvm.nusage",
-            "lmem.nalloc", "lmem.nrealloc", "lmem.nfree",
-            "lmem.total", "lmem.average", "lmem.minimum", "lmem.maximum",
-            "kvcache.nalloc", "kvcache.nfree", "kvcache.nusage",
+            "lvm.nalloc",
+            "lvm.nfree",
+            "lvm.nusage",
+            "lmem.nalloc",
+            "lmem.nrealloc",
+            "lmem.nfree",
+            "lmem.total",
+            "lmem.average",
+            "lmem.minimum",
+            "lmem.maximum",
+            "kvcache.nalloc",
+            "kvcache.nfree",
+            "kvcache.nusage",
         }
         self.assertEqual(set(REQUIRED_COUNTER_KEYS), expected)
 

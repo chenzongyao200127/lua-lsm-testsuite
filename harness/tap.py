@@ -18,7 +18,7 @@ Output format (TAP 13 with plan line LAST per the spec):
 
 from __future__ import annotations
 
-from typing import Iterable, Mapping
+from collections.abc import Iterable, Mapping
 
 from . import schemas
 

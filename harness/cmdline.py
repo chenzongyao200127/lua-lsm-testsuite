@@ -17,7 +17,7 @@ distorted by panic_on_warn / oops=panic.
 
 from __future__ import annotations
 
-from typing import Iterable, Mapping, MutableMapping
+from collections.abc import Iterable, Mapping, MutableMapping
 
 BUGHUNT_KNOBS = ("panic_on_warn=1", "panic=-1", "oops=panic")
 VALID_KINDS = ("perf", "bughunt")
@@ -36,9 +36,7 @@ def compose(profile: Mapping) -> str:
     """
     kind = profile.get("kind")
     if kind not in VALID_KINDS:
-        raise CmdlineError(
-            f"profile.kind must be one of {VALID_KINDS}, got {kind!r}"
-        )
+        raise CmdlineError(f"profile.kind must be one of {VALID_KINDS}, got {kind!r}")
 
     extra: Iterable[str] = profile.get("extra") or ()
     extra_list = list(extra)
@@ -60,9 +58,7 @@ def compose(profile: Mapping) -> str:
     pool_max = profile.get("lvm_pool_max")
     if pool_max is not None:
         if not isinstance(pool_max, int) or pool_max < 0:
-            raise CmdlineError(
-                f"lvm_pool_max must be a non-negative int, got {pool_max!r}"
-            )
+            raise CmdlineError(f"lvm_pool_max must be a non-negative int, got {pool_max!r}")
         parts.append(f"lua.lvm_pool_max={pool_max}")
 
     if profile.get("nodebug"):
@@ -76,7 +72,9 @@ def compose(profile: Mapping) -> str:
     return " ".join(parts)
 
 
-def compose_env(profile: Mapping, base_env: Mapping[str, str] | None = None) -> MutableMapping[str, str]:
+def compose_env(
+    profile: Mapping, base_env: Mapping[str, str] | None = None
+) -> MutableMapping[str, str]:
     """Build an environment dict suitable for spawning the local launcher.
 
     Returns a fresh dict so the caller can layer additional knobs (HOST_SSH_PORT,

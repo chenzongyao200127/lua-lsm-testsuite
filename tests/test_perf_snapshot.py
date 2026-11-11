@@ -66,11 +66,21 @@ class ParseTests(unittest.TestCase):
     def test_diff_counters_and_funcs(self):
         before = Snapshot(
             counters={"lvm.nalloc": 100, "kvcache.nusage": 10},
-            lsm_funcs={"file_open": {"nlsm": 1, "count": 0, "total": 0, "average": 0, "maxtime": 0}},
+            lsm_funcs={
+                "file_open": {"nlsm": 1, "count": 0, "total": 0, "average": 0, "maxtime": 0}
+            },
         )
         after = Snapshot(
             counters={"lvm.nalloc": 130, "kvcache.nusage": 12},
-            lsm_funcs={"file_open": {"nlsm": 1, "count": 5, "total": 5000, "average": 1000, "maxtime": 2500}},
+            lsm_funcs={
+                "file_open": {
+                    "nlsm": 1,
+                    "count": 5,
+                    "total": 5000,
+                    "average": 1000,
+                    "maxtime": 2500,
+                }
+            },
         )
         d = diff(before, after)
         self.assertEqual(d["counters"]["lvm.nalloc"], 30)

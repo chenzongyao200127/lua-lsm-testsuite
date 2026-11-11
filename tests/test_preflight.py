@@ -30,26 +30,40 @@ class GuestPreflightTests(unittest.TestCase):
         return ssh.SshTarget(host="127.0.0.1", port=10023, user="root", key_path=Path("/dev/null"))
 
     def test_host_share_mounted_returns_none(self):
-        with patch.object(ssh, "run", return_value=ssh.SshResult(returncode=0, stdout="", stderr="")):
+        with patch.object(
+            ssh, "run", return_value=ssh.SshResult(returncode=0, stdout="", stderr="")
+        ):
             self.assertIsNone(preflight.host_share_check(self._target()))
 
     def test_host_share_unmounted_returns_skip(self):
-        with patch.object(ssh, "run", return_value=ssh.SshResult(returncode=32, stdout="", stderr="not a mountpoint")):
+        with patch.object(
+            ssh,
+            "run",
+            return_value=ssh.SshResult(returncode=32, stdout="", stderr="not a mountpoint"),
+        ):
             r = preflight.host_share_check(self._target())
             self.assertIsNotNone(r)
             self.assertEqual(r["verdict"], "skip:fixture-missing")
 
     def test_workload_binary_present(self):
-        with patch.object(ssh, "run", return_value=ssh.SshResult(returncode=0, stdout="", stderr="")):
-            self.assertIsNone(preflight.workload_binary_check(self._target(), ["/mnt/host/unixbench/Run"]))
+        with patch.object(
+            ssh, "run", return_value=ssh.SshResult(returncode=0, stdout="", stderr="")
+        ):
+            self.assertIsNone(
+                preflight.workload_binary_check(self._target(), ["/mnt/host/unixbench/Run"])
+            )
 
     def test_workload_binary_missing(self):
-        with patch.object(ssh, "run", return_value=ssh.SshResult(returncode=1, stdout="", stderr="")):
+        with patch.object(
+            ssh, "run", return_value=ssh.SshResult(returncode=1, stdout="", stderr="")
+        ):
             r = preflight.workload_binary_check(self._target(), ["/mnt/host/unixbench/Run"])
             self.assertEqual(r["verdict"], "skip:fixture-missing")
 
     def test_securityfs_lua_missing(self):
-        with patch.object(ssh, "run", return_value=ssh.SshResult(returncode=1, stdout="", stderr="")):
+        with patch.object(
+            ssh, "run", return_value=ssh.SshResult(returncode=1, stdout="", stderr="")
+        ):
             r = preflight.securityfs_lua_check(self._target())
             self.assertEqual(r["verdict"], "skip:stats-unavailable")
 

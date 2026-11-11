@@ -12,7 +12,6 @@ import os
 import platform
 from dataclasses import dataclass
 
-
 # Env var that operator scripts and the no-KVM acceptance test use to force
 # `has_kvm=False` from a host that happens to have /dev/kvm. Honored only when
 # the caller does NOT pass an explicit kvm_path= override, so production
@@ -30,9 +29,11 @@ class HostEnv:
     has_kvm: bool
 
 
-def detect(system_override: str | None = None,
-           kvm_path: str | None = None,
-           release_override: str | None = None) -> HostEnv:
+def detect(
+    system_override: str | None = None,
+    kvm_path: str | None = None,
+    release_override: str | None = None,
+) -> HostEnv:
     """Inspect the host. Test code may override system/kvm_path for unit tests.
 
     The kvm_path lookup order is:

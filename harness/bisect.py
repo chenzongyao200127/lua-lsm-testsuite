@@ -24,7 +24,7 @@ without spinning up a real matrix run.
 
 from __future__ import annotations
 
-from typing import Mapping
+from collections.abc import Mapping
 
 from . import schemas
 
@@ -38,19 +38,23 @@ KSFT_ABORT = 128
 # the bisect). build-fail and boot-timeout are listed by `schemas.FAIL_VERDICTS`
 # as fail-class for TAP, but for `git bisect run` we want them treated as skip
 # because the commit itself never produced a kernel signal worth blaming.
-_CELL_UNTESTABLE_VERDICTS: frozenset[str] = frozenset({
-    "build-fail",
-    "boot-timeout",
-})
+_CELL_UNTESTABLE_VERDICTS: frozenset[str] = frozenset(
+    {
+        "build-fail",
+        "boot-timeout",
+    }
+)
 
 # Per-cell verdicts that mean "the harness itself broke" (abort the bisect).
 # Bundle-write failures are detected separately via `result.get("bundle_error")`
 # and ALSO route here.
-_CELL_ABORT_VERDICTS: frozenset[str] = frozenset({
-    "harness-error",
-    "aborted",
-    "no-dmesg",
-})
+_CELL_ABORT_VERDICTS: frozenset[str] = frozenset(
+    {
+        "harness-error",
+        "aborted",
+        "no-dmesg",
+    }
+)
 
 
 def exit_code_from_cell_result(result: Mapping[str, object]) -> int:

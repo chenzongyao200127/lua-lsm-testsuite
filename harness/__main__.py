@@ -31,15 +31,27 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any
 
 from . import (
-    bisect, bundle, cell_runner, cmdline, hostenv, matrix, preflight, qemu,
-    run_registry, schemas, ssh, tap, junit, workloads,
+    bisect,
+    bundle,
+    cell_runner,
+    cmdline,
+    hostenv,
+    junit,
+    matrix,
+    preflight,
+    qemu,
+    run_registry,
+    schemas,
+    ssh,
+    tap,
+    workloads,
 )
-import subprocess
 
 # KSFT exit codes used by `run` and `matrix` (bisect-run uses harness.bisect).
 KSFT_PASS = 0
@@ -47,10 +59,8 @@ KSFT_FAIL = 1
 KSFT_SKIP = 4
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_TOOLS_DIR = Path(os.environ.get("LUA_LSM_TESTSUITE_TOOLS_DIR",
-                                         str(REPO_ROOT / "tools")))
-DEFAULT_LAUNCHER = Path(os.environ.get("LAUNCHER",
-                                        str(DEFAULT_TOOLS_DIR / "run_qemu_anolis.sh")))
+DEFAULT_TOOLS_DIR = Path(os.environ.get("LUA_LSM_TESTSUITE_TOOLS_DIR", str(REPO_ROOT / "tools")))
+DEFAULT_LAUNCHER = Path(os.environ.get("LAUNCHER", str(DEFAULT_TOOLS_DIR / "run_qemu_anolis.sh")))
 DEFAULT_RUNS_ROOT = Path(os.environ.get("RUNS_ROOT", "runs"))
 
 
@@ -66,55 +76,97 @@ def _build_parser() -> argparse.ArgumentParser:
     pr.add_argument("--kernel", required=False, type=Path, help="bzImage path")
     pr.add_argument("--rootfs", required=False, type=Path, help="rootfs image path")
     pr.add_argument("--launcher", type=Path, default=DEFAULT_LAUNCHER)
-    pr.add_argument("--ssh-key", type=Path, default=Path(os.environ.get(
-        "SSH_KEY", os.path.expanduser("~/.ssh/id_rsa"))))
-    pr.add_argument("--ssh-port", type=int, default=int(os.environ.get(
-        "HOST_SSH_PORT", matrix.DEFAULT_PORT_BASE)))
+    pr.add_argument(
+        "--ssh-key",
+        type=Path,
+        default=Path(os.environ.get("SSH_KEY", os.path.expanduser("~/.ssh/id_rsa"))),
+    )
+    pr.add_argument(
+        "--ssh-port",
+        type=int,
+        default=int(os.environ.get("HOST_SSH_PORT", matrix.DEFAULT_PORT_BASE)),
+    )
     pr.add_argument("--ssh-user", default=os.environ.get("SSH_USER", "root"))
-    pr.add_argument("--share-dir", type=Path,
-                    default=Path(os.environ["SHARE_DIR"]) if os.environ.get("SHARE_DIR") else None)
-    pr.add_argument("--workload", default="smoke",
-                    choices=sorted(workloads.REGISTRY))
-    pr.add_argument("--policy", default=None,
-                    help="policy file under the workload's fixture or tools directory")
+    pr.add_argument(
+        "--share-dir",
+        type=Path,
+        default=Path(os.environ["SHARE_DIR"]) if os.environ.get("SHARE_DIR") else None,
+    )
+    pr.add_argument("--workload", default="smoke", choices=sorted(workloads.REGISTRY))
+    pr.add_argument(
+        "--policy", default=None, help="policy file under the workload's fixture or tools directory"
+    )
     pr.add_argument("--kind", default="bughunt", choices=("perf", "bughunt"))
-    pr.add_argument("--lsm", default=None,
-                    help="lsm chain string passed to the kernel cmdline")
+    pr.add_argument("--lsm", default=None, help="lsm chain string passed to the kernel cmdline")
     pr.add_argument("--lvm-pool-max", type=int, default=None)
     pr.add_argument("--nodebug", action="store_true")
-    pr.add_argument("--no-kvm", action="store_true",
-                    help="treat KVM as not required for this cell")
+    pr.add_argument("--no-kvm", action="store_true", help="treat KVM as not required for this cell")
     pr.add_argument("--boot-timeout", type=float, default=180.0)
     pr.add_argument("--workload-timeout", type=float, default=600.0)
     pr.add_argument("--runs-root", type=Path, default=DEFAULT_RUNS_ROOT)
     mode = pr.add_mutually_exclusive_group()
-    mode.add_argument("--headless", action="store_true",
-                      help="non-interactive run (default)")
-    mode.add_argument("--interactive", action="store_true",
-                      help=("run with the launcher attached to the controlling terminal "
-                            "(serial console inherits stdio); the VM is still torn down "
-                            "after the workload"))
-    mode.add_argument("--detach-vm", action="store_true",
-                      help="leave the VM up after run; print SSH details and exit")
-    pr.add_argument("--tap", action="store_true",
-                    help="emit a one-line TAP test point on stdout after the run")
-    pr.add_argument("--kconfig-profile",
-                    choices=sorted(schemas.VALID_KCONFIG_PROFILES),
-                    default=None,
-                    help="kconfig profile (standard|full); recorded in result.json")
-    pr.add_argument("--build-kernel", action="store_true",
-                    help=("invoke enable-debug-kconfig.sh --kernel <tree> "
-                          "--profile <X> before launch (requires --kernel-tree)"))
-    pr.add_argument("--kernel-tree", type=Path, default=None,
-                    help="kernel source tree path (used for build + bundle)")
-    pr.add_argument("--debug-kernel", type=Path, default=DEFAULT_TOOLS_DIR,
-                    help="directory containing host build helpers")
-    pr.add_argument("--kernel-config", type=Path, default=None,
-                    help="kernel .config path to record in the bundle")
-    pr.add_argument("--kernel-config-baseline", type=Path, default=None,
-                    help="baseline .config to diff the active config against")
-    pr.add_argument("--decode-script", type=Path, default=None,
-                    help="path to scripts/decode_stacktrace.sh for bundle decode")
+    mode.add_argument("--headless", action="store_true", help="non-interactive run (default)")
+    mode.add_argument(
+        "--interactive",
+        action="store_true",
+        help=(
+            "run with the launcher attached to the controlling terminal "
+            "(serial console inherits stdio); the VM is still torn down "
+            "after the workload"
+        ),
+    )
+    mode.add_argument(
+        "--detach-vm",
+        action="store_true",
+        help="leave the VM up after run; print SSH details and exit",
+    )
+    pr.add_argument(
+        "--tap", action="store_true", help="emit a one-line TAP test point on stdout after the run"
+    )
+    pr.add_argument(
+        "--kconfig-profile",
+        choices=sorted(schemas.VALID_KCONFIG_PROFILES),
+        default=None,
+        help="kconfig profile (standard|full); recorded in result.json",
+    )
+    pr.add_argument(
+        "--build-kernel",
+        action="store_true",
+        help=(
+            "invoke enable-debug-kconfig.sh --kernel <tree> "
+            "--profile <X> before launch (requires --kernel-tree)"
+        ),
+    )
+    pr.add_argument(
+        "--kernel-tree",
+        type=Path,
+        default=None,
+        help="kernel source tree path (used for build + bundle)",
+    )
+    pr.add_argument(
+        "--debug-kernel",
+        type=Path,
+        default=DEFAULT_TOOLS_DIR,
+        help="directory containing host build helpers",
+    )
+    pr.add_argument(
+        "--kernel-config",
+        type=Path,
+        default=None,
+        help="kernel .config path to record in the bundle",
+    )
+    pr.add_argument(
+        "--kernel-config-baseline",
+        type=Path,
+        default=None,
+        help="baseline .config to diff the active config against",
+    )
+    pr.add_argument(
+        "--decode-script",
+        type=Path,
+        default=None,
+        help="path to scripts/decode_stacktrace.sh for bundle decode",
+    )
 
     # --- matrix ---
     pm = sub.add_parser("matrix", help="run a matrix of cells")
@@ -122,30 +174,49 @@ def _build_parser() -> argparse.ArgumentParser:
     pm.add_argument("--kernel", required=False, type=Path)
     pm.add_argument("--rootfs", required=False, type=Path)
     pm.add_argument("--launcher", type=Path, default=DEFAULT_LAUNCHER)
-    pm.add_argument("--ssh-key", type=Path, default=Path(os.environ.get(
-        "SSH_KEY", os.path.expanduser("~/.ssh/id_rsa"))))
+    pm.add_argument(
+        "--ssh-key",
+        type=Path,
+        default=Path(os.environ.get("SSH_KEY", os.path.expanduser("~/.ssh/id_rsa"))),
+    )
     pm.add_argument("--ssh-user", default=os.environ.get("SSH_USER", "root"))
-    pm.add_argument("--share-dir", type=Path,
-                    default=Path(os.environ["SHARE_DIR"]) if os.environ.get("SHARE_DIR") else None)
+    pm.add_argument(
+        "--share-dir",
+        type=Path,
+        default=Path(os.environ["SHARE_DIR"]) if os.environ.get("SHARE_DIR") else None,
+    )
     pm.add_argument("--port-base", type=int, default=matrix.DEFAULT_PORT_BASE)
     pm.add_argument("--parallel", type=int, default=1)
     pm.add_argument("--runs-root", type=Path, default=DEFAULT_RUNS_ROOT)
     pm.add_argument("--boot-timeout", type=float, default=180.0)
     pm.add_argument("--workload-timeout", type=float, default=600.0)
-    pm.add_argument("--headless", action="store_true",
-                    help="(default) matrix runs are always non-interactive")
-    pm.add_argument("--tap", action="store_true",
-                    help="emit TAP/KTAP version 13 to stdout after the run")
-    pm.add_argument("--junit", type=Path, default=None,
-                    help="write a JUnit XML report of the matrix to this path")
-    pm.add_argument("--kconfig-profile",
-                    choices=sorted(schemas.VALID_KCONFIG_PROFILES),
-                    default=None,
-                    help="kconfig profile (standard|full); recorded per cell")
-    pm.add_argument("--build-kernel", action="store_true",
-                    help=("invoke enable-debug-kconfig.sh --kernel <tree> "
-                          "--profile <X> once per distinct profile before "
-                          "scheduling (requires --kernel-tree)"))
+    pm.add_argument(
+        "--headless", action="store_true", help="(default) matrix runs are always non-interactive"
+    )
+    pm.add_argument(
+        "--tap", action="store_true", help="emit TAP/KTAP version 13 to stdout after the run"
+    )
+    pm.add_argument(
+        "--junit",
+        type=Path,
+        default=None,
+        help="write a JUnit XML report of the matrix to this path",
+    )
+    pm.add_argument(
+        "--kconfig-profile",
+        choices=sorted(schemas.VALID_KCONFIG_PROFILES),
+        default=None,
+        help="kconfig profile (standard|full); recorded per cell",
+    )
+    pm.add_argument(
+        "--build-kernel",
+        action="store_true",
+        help=(
+            "invoke enable-debug-kconfig.sh --kernel <tree> "
+            "--profile <X> once per distinct profile before "
+            "scheduling (requires --kernel-tree)"
+        ),
+    )
     pm.add_argument("--kernel-tree", type=Path, default=None)
     pm.add_argument("--debug-kernel", type=Path, default=DEFAULT_TOOLS_DIR)
     pm.add_argument("--kernel-config", type=Path, default=None)
@@ -153,32 +224,48 @@ def _build_parser() -> argparse.ArgumentParser:
     pm.add_argument("--decode-script", type=Path, default=None)
 
     # --- bisect-run ---
-    pb = sub.add_parser("bisect-run",
-                        help=("run a single cell (--cell) or matrix (--config) "
-                              "and exit with KSFT/bisect codes 0/1/125/128"))
+    pb = sub.add_parser(
+        "bisect-run",
+        help=(
+            "run a single cell (--cell) or matrix (--config) "
+            "and exit with KSFT/bisect codes 0/1/125/128"
+        ),
+    )
     pb_target = pb.add_mutually_exclusive_group(required=True)
-    pb_target.add_argument("--cell", type=Path,
-                           help=("single-cell profile YAML/JSON: a flat dict "
-                                 "of profile knobs (workload, kind, policy, ...) "
-                                 "describing the one cell git-bisect will probe"))
-    pb_target.add_argument("--config", type=Path,
-                           help="matrix YAML/JSON (matrix mode; back-compat)")
+    pb_target.add_argument(
+        "--cell",
+        type=Path,
+        help=(
+            "single-cell profile YAML/JSON: a flat dict "
+            "of profile knobs (workload, kind, policy, ...) "
+            "describing the one cell git-bisect will probe"
+        ),
+    )
+    pb_target.add_argument(
+        "--config", type=Path, help="matrix YAML/JSON (matrix mode; back-compat)"
+    )
     pb.add_argument("--kernel", required=False, type=Path)
     pb.add_argument("--rootfs", required=False, type=Path)
     pb.add_argument("--launcher", type=Path, default=DEFAULT_LAUNCHER)
-    pb.add_argument("--ssh-key", type=Path, default=Path(os.environ.get(
-        "SSH_KEY", os.path.expanduser("~/.ssh/id_rsa"))))
+    pb.add_argument(
+        "--ssh-key",
+        type=Path,
+        default=Path(os.environ.get("SSH_KEY", os.path.expanduser("~/.ssh/id_rsa"))),
+    )
     pb.add_argument("--ssh-user", default=os.environ.get("SSH_USER", "root"))
-    pb.add_argument("--share-dir", type=Path,
-                    default=Path(os.environ["SHARE_DIR"]) if os.environ.get("SHARE_DIR") else None)
+    pb.add_argument(
+        "--share-dir",
+        type=Path,
+        default=Path(os.environ["SHARE_DIR"]) if os.environ.get("SHARE_DIR") else None,
+    )
     pb.add_argument("--port-base", type=int, default=matrix.DEFAULT_PORT_BASE)
     pb.add_argument("--parallel", type=int, default=1)
     pb.add_argument("--runs-root", type=Path, default=DEFAULT_RUNS_ROOT)
     pb.add_argument("--boot-timeout", type=float, default=180.0)
     pb.add_argument("--workload-timeout", type=float, default=600.0)
-    pb.add_argument("--kconfig-profile",
-                    choices=sorted(schemas.VALID_KCONFIG_PROFILES),
-                    default=None)
+    pb.add_argument(
+        "--kconfig-profile", choices=sorted(schemas.VALID_KCONFIG_PROFILES), default=None
+    )
     pb.add_argument("--build-kernel", action="store_true")
     pb.add_argument("--kernel-tree", type=Path, default=None)
     pb.add_argument("--debug-kernel", type=Path, default=DEFAULT_TOOLS_DIR)
@@ -187,11 +274,14 @@ def _build_parser() -> argparse.ArgumentParser:
     pb.add_argument("--decode-script", type=Path, default=None)
 
     # --- image-warm ---
-    pw = sub.add_parser("image-warm",
-                        help="write the rootfs warm-marker for a given image")
+    pw = sub.add_parser("image-warm", help="write the rootfs warm-marker for a given image")
     pw.add_argument("--image", required=True, type=Path)
-    pw.add_argument("--marker", type=Path, default=None,
-                    help="explicit marker path (default: <image>.warm-marker)")
+    pw.add_argument(
+        "--marker",
+        type=Path,
+        default=None,
+        help="explicit marker path (default: <image>.warm-marker)",
+    )
 
     return p
 
@@ -204,6 +294,7 @@ def _enforce_supported_host() -> None:
 
 # ---------------------------------------------------------------------------
 # Helpers shared between `run` and matrix-driven cells.
+
 
 def _profile_from_run_args(args: argparse.Namespace) -> dict[str, Any]:
     return {
@@ -247,24 +338,23 @@ def _run_kernel_build_profile(args: argparse.Namespace, profile: str) -> int:
     `--build-kernel` guard for each profile.
     """
     if args.debug_kernel is None or not Path(args.debug_kernel).exists():
-        print(f"error: --debug-kernel path missing: {args.debug_kernel}",
-              file=sys.stderr)
+        print(f"error: --debug-kernel path missing: {args.debug_kernel}", file=sys.stderr)
         return KSFT_FAIL
     helper = Path(args.debug_kernel) / "enable-debug-kconfig.sh"
     if not helper.exists():
-        print(f"error: enable-debug-kconfig.sh not found at {helper}",
-              file=sys.stderr)
+        print(f"error: enable-debug-kconfig.sh not found at {helper}", file=sys.stderr)
         return KSFT_FAIL
     kernel_tree = getattr(args, "kernel_tree", None)
     if kernel_tree is None:
-        print("error: --build-kernel requires --kernel-tree "
-              "(enable-debug-kconfig.sh requires --kernel <dir>)",
-              file=sys.stderr)
+        print(
+            "error: --build-kernel requires --kernel-tree "
+            "(enable-debug-kconfig.sh requires --kernel <dir>)",
+            file=sys.stderr,
+        )
         return KSFT_FAIL
     kernel_tree = Path(kernel_tree)
     if not kernel_tree.exists():
-        print(f"error: --kernel-tree path missing: {kernel_tree}",
-              file=sys.stderr)
+        print(f"error: --kernel-tree path missing: {kernel_tree}", file=sys.stderr)
         return KSFT_FAIL
     cmd = [str(helper), "--kernel", str(kernel_tree), "--profile", profile]
     try:
@@ -278,8 +368,9 @@ def _run_kernel_build_profile(args: argparse.Namespace, profile: str) -> int:
     return 0
 
 
-def _validate_matrix_kconfig_profiles(plan: matrix.MatrixPlan,
-                                      cli_default: str | None) -> tuple[list[str], int]:
+def _validate_matrix_kconfig_profiles(
+    plan: matrix.MatrixPlan, cli_default: str | None
+) -> tuple[list[str], int]:
     """Validate every expanded cell's kconfig_profile.
 
     Returns (distinct_profiles, rc). `distinct_profiles` is the ordered list of
@@ -318,15 +409,16 @@ def _validate_matrix_kconfig_profiles(plan: matrix.MatrixPlan,
     return distinct, 0
 
 
-def _maybe_run_kernel_build_for_profiles(args: argparse.Namespace,
-                                         profiles: list[str]) -> int:
+def _maybe_run_kernel_build_for_profiles(args: argparse.Namespace, profiles: list[str]) -> int:
     """For matrix mode: build the kernel once per distinct expanded profile."""
     if not getattr(args, "build_kernel", False):
         return 0
     if not profiles:
-        print("error: --build-kernel requires at least one kconfig profile "
-              "(set --kconfig-profile or specify kconfig_profile in the matrix)",
-              file=sys.stderr)
+        print(
+            "error: --build-kernel requires at least one kconfig profile "
+            "(set --kconfig-profile or specify kconfig_profile in the matrix)",
+            file=sys.stderr,
+        )
         return KSFT_FAIL
     for profile in profiles:
         rc = _run_kernel_build_profile(args, profile)
@@ -345,8 +437,9 @@ def _make_bundle_store() -> bundle.BundleStore:
     return bundle.BundleStore()
 
 
-def _resolve_policy_paths(share_dir: Path | None, policy_name: str | None,
-                          workload_name: str) -> tuple[Path, ...]:
+def _resolve_policy_paths(
+    share_dir: Path | None, policy_name: str | None, workload_name: str
+) -> tuple[Path, ...]:
     """Resolve the policy file(s) a cell will register, relative to share_dir.
 
     Returns a tuple of absolute host paths (suitable for BundleSources.policies).
@@ -360,9 +453,9 @@ def _resolve_policy_paths(share_dir: Path | None, policy_name: str | None,
     return workloads.policy_host_path(share_dir, workload_name, policy_name)
 
 
-def _base_env(args: argparse.Namespace,
-              ssh_port: int,
-              guest_artifact_relpath: str | None) -> dict[str, str]:
+def _base_env(
+    args: argparse.Namespace, ssh_port: int, guest_artifact_relpath: str | None
+) -> dict[str, str]:
     env: dict[str, str] = {}
     if args.kernel is not None:
         env["KERNEL_IMG"] = str(args.kernel)
@@ -399,6 +492,7 @@ def _verdict_to_run_exit(verdict: str | None) -> int:
 # ---------------------------------------------------------------------------
 # Subcommand bodies.
 
+
 def _cmd_run(args: argparse.Namespace) -> int:
     _enforce_supported_host()
 
@@ -427,7 +521,9 @@ def _cmd_run(args: argparse.Namespace) -> int:
     runs_root = Path(args.runs_root)
     runs_root.mkdir(parents=True, exist_ok=True)
 
-    cell_id = cell_runner._make_cell_id({"kind": args.kind, "workload": args.workload}, args.workload)
+    cell_id = cell_runner._make_cell_id(
+        {"kind": args.kind, "workload": args.workload}, args.workload
+    )
     artifact_dir = runs_root / cell_id
     guest_rel = None
     try:
@@ -508,7 +604,9 @@ def _run_cell_detached(inputs: cell_runner.CellInputs, artifact_dir: Path) -> in
 
     try:
         handle = qemu.spawn(
-            inputs.launcher, env, artifact_dir / "serial.log",
+            inputs.launcher,
+            env,
+            artifact_dir / "serial.log",
             interactive=inputs.interactive,
         )
     except qemu.QemuLaunchError as e:
@@ -516,8 +614,7 @@ def _run_cell_detached(inputs: cell_runner.CellInputs, artifact_dir: Path) -> in
         return KSFT_FAIL
 
     if not ssh.wait_for_ssh(inputs.ssh_target, timeout_s=inputs.boot_timeout_s):
-        print(f"error: ssh did not come up within {inputs.boot_timeout_s:.0f}s",
-              file=sys.stderr)
+        print(f"error: ssh did not come up within {inputs.boot_timeout_s:.0f}s", file=sys.stderr)
         # Leave the VM running so the user can investigate why ssh failed.
         print(f"pid={handle.proc.pid}\nssh_port={inputs.ssh_target.port}")
         return KSFT_FAIL
@@ -526,9 +623,12 @@ def _run_cell_detached(inputs: cell_runner.CellInputs, artifact_dir: Path) -> in
     return KSFT_PASS
 
 
-def _build_cell_runner_callback(args: argparse.Namespace, workspace_root: Path,
-                                bundle_store: bundle.BundleStore | None = None,
-                                registry: run_registry.RunRegistry | None = None):
+def _build_cell_runner_callback(
+    args: argparse.Namespace,
+    workspace_root: Path,
+    bundle_store: bundle.BundleStore | None = None,
+    registry: run_registry.RunRegistry | None = None,
+):
     """Return a (cell, artifact_dir, port) -> result.json dict callable.
 
     The factory closes over the bundle store + run registry so the matrix
@@ -546,7 +646,10 @@ def _build_cell_runner_callback(args: argparse.Namespace, workspace_root: Path,
         profile = dict(cell.profile)
         profile.setdefault("workload_timeout_s", args.workload_timeout)
         profile["guest_artifact_relpath"] = guest_rel
-        if profile.get("kconfig_profile") is None and getattr(args, "kconfig_profile", None) is not None:
+        if (
+            profile.get("kconfig_profile") is None
+            and getattr(args, "kconfig_profile", None) is not None
+        ):
             profile["kconfig_profile"] = args.kconfig_profile
 
         policy_paths = _resolve_policy_paths(
@@ -620,7 +723,10 @@ def _cmd_matrix(args: argparse.Namespace) -> int:
         registry=registry,
     )
     runner_cb = _build_cell_runner_callback(
-        args, workspace_root, bundle_store=bundle_store, registry=registry,
+        args,
+        workspace_root,
+        bundle_store=bundle_store,
+        registry=registry,
     )
     matrix_doc = matrix.run_matrix(plan, opts, runner_cb)
 
@@ -658,8 +764,7 @@ def _load_cell_profile(path: Path) -> dict[str, Any]:
             import yaml  # type: ignore[import-not-found]
         except ImportError as e:
             raise RuntimeError(
-                "PyYAML required for .yaml cell profile; install pyyaml "
-                "or use a .json profile file"
+                "PyYAML required for .yaml cell profile; install pyyaml or use a .json profile file"
             ) from e
         doc = yaml.safe_load(text) or {}
     else:
@@ -693,8 +798,11 @@ def _cmd_bisect_run_single_cell(args: argparse.Namespace) -> int:
     # --build-kernel: invoke the helper exactly once for the cell's profile.
     if getattr(args, "build_kernel", False):
         if cell_kconfig is None:
-            print("error: --build-kernel requires --kconfig-profile or a "
-                  "kconfig_profile key in the cell profile", file=sys.stderr)
+            print(
+                "error: --build-kernel requires --kconfig-profile or a "
+                "kconfig_profile key in the cell profile",
+                file=sys.stderr,
+            )
             return bisect.KSFT_ABORT
         rc = _run_kernel_build_profile(args, cell_kconfig)
         if rc != 0:
@@ -770,8 +878,7 @@ def _cmd_bisect_run_single_cell(args: argparse.Namespace) -> int:
     except Exception as e:
         # Anything that escapes run_cell is by definition a harness internal
         # failure: bisect must abort (128) rather than blame the commit.
-        print(f"error: harness raised during bisect single-cell run: {e}",
-              file=sys.stderr)
+        print(f"error: harness raised during bisect single-cell run: {e}", file=sys.stderr)
         return bisect.KSFT_ABORT
     return bisect.exit_code_from_cell_result(result)
 
@@ -814,7 +921,10 @@ def _cmd_bisect_run(args: argparse.Namespace) -> int:
         registry=registry,
     )
     runner_cb = _build_cell_runner_callback(
-        args, workspace_root, bundle_store=bundle_store, registry=registry,
+        args,
+        workspace_root,
+        bundle_store=bundle_store,
+        registry=registry,
     )
     matrix_doc = matrix.run_matrix(plan, opts, runner_cb)
     return bisect.exit_code_from_matrix(matrix_doc)
@@ -836,6 +946,7 @@ def _cmd_image_warm(args: argparse.Namespace) -> int:
 
 
 # ---------------------------------------------------------------------------
+
 
 def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()

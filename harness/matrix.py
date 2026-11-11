@@ -16,15 +16,17 @@ knobs without the planner needing to know about them.
 from __future__ import annotations
 
 import concurrent.futures as cf
+import contextlib
 import datetime as _dt
 import itertools
 import json
 import re
 import signal
 import threading
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 
 from . import run_registry, schemas, workloads
 
@@ -108,10 +110,7 @@ def expand(matrix_doc: Mapping[str, Any]) -> list[CellSpec]:
 
 
 def _matches_any(profile: Mapping[str, Any], rules: list[Mapping[str, Any]]) -> bool:
-    for rule in rules:
-        if all(profile.get(k) == v for k, v in rule.items()):
-            return True
-    return False
+    return any(all(profile.get(k) == v for k, v in rule.items()) for rule in rules)
 
 
 @dataclass
@@ -134,8 +133,7 @@ def plan_from_file(matrix_path: Path) -> MatrixPlan:
             import yaml  # type: ignore[import-not-found]
         except ImportError as e:
             raise RuntimeError(
-                "PyYAML required for .yaml matrix files; install pyyaml or "
-                "use a .json matrix file"
+                "PyYAML required for .yaml matrix files; install pyyaml or use a .json matrix file"
             ) from e
         doc = yaml.safe_load(text) or {}
     else:
@@ -148,6 +146,7 @@ def plan_from_file(matrix_path: Path) -> MatrixPlan:
 # Share-dir refusal: matrices that drive a 9p host_share need a workspace
 # that actually contains the lua-lsm-tools and kernel sources, otherwise the
 # guest workloads will fail with confusing "no such file" errors after SSH up.
+
 
 class ShareDirError(ValueError):
     pass
@@ -169,8 +168,7 @@ def required_share_entries(workload_names: list[str]) -> tuple[str, ...]:
     return REQUIRED_SHARE_ENTRIES
 
 
-def assert_share_dir(share_dir: Path,
-                     required_entries: tuple[str, ...] | None = None) -> None:
+def assert_share_dir(share_dir: Path, required_entries: tuple[str, ...] | None = None) -> None:
     """Refuse a workspace that's missing the load-bearing trees.
 
     The matrix runner calls this once at planning time so a bad SHARE_DIR
@@ -215,6 +213,7 @@ def allocate_ports(n: int, base: int = DEFAULT_PORT_BASE) -> list[int]:
 
 
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class ExecutorOpts:
@@ -268,7 +267,7 @@ def run_matrix(plan: MatrixPlan, opts: ExecutorOpts, cell_runner_fn) -> dict[str
     finished: dict[str, dict[str, Any]] = {}
     aborted_event = threading.Event()
 
-    def _cell_artifact_dir(cell: "CellSpec") -> Path:
+    def _cell_artifact_dir(cell: CellSpec) -> Path:
         return runs_dir / cell.cell_id
 
     def _run_one(cell: CellSpec, port: int) -> dict[str, Any]:
@@ -297,10 +296,8 @@ def run_matrix(plan: MatrixPlan, opts: ExecutorOpts, cell_runner_fn) -> dict[str
         # gives up. Best-effort: registry.stop_all swallows per-handle
         # exceptions and returns the list it attempted to reap.
         if opts.registry is not None:
-            try:
+            with contextlib.suppress(Exception):
                 opts.registry.stop_all(timeout_s=run_registry.SHUTDOWN_GRACE_S)
-            except Exception:
-                pass
         # Cancel any queued (not-yet-started) future. cf.as_completed otherwise
         # blocks until the threadpool gets around to running each submission,
         # which negates the abort for back-of-queue cells. The as_completed
@@ -326,21 +323,25 @@ def run_matrix(plan: MatrixPlan, opts: ExecutorOpts, cell_runner_fn) -> dict[str
         else:
             with cf.ThreadPoolExecutor(max_workers=workers) as ex:
                 with cells_lock:
-                    futs_holder.update({
-                        ex.submit(_run_one, cell, port): cell
-                        for cell, port in zip(plan.cells, ports)
-                    })
+                    futs_holder.update(
+                        {
+                            ex.submit(_run_one, cell, port): cell
+                            for cell, port in zip(plan.cells, ports)
+                        }
+                    )
                 for fut in cf.as_completed(list(futs_holder)):
                     try:
                         results.append(fut.result())
                     except cf.CancelledError:
                         cell = futs_holder[fut]
-                        results.append(_aborted_result(
-                            cell.cell_id, "cancelled by SIGINT before launch"))
+                        results.append(
+                            _aborted_result(cell.cell_id, "cancelled by SIGINT before launch")
+                        )
                     except Exception as e:
                         cell = futs_holder[fut]
-                        results.append(_aborted_result(
-                            cell.cell_id, f"worker raised {type(e).__name__}: {e}"))
+                        results.append(
+                            _aborted_result(cell.cell_id, f"worker raised {type(e).__name__}: {e}")
+                        )
     finally:
         if prev_handler is not None:
             signal.signal(signal.SIGINT, prev_handler)
@@ -354,14 +355,17 @@ def run_matrix(plan: MatrixPlan, opts: ExecutorOpts, cell_runner_fn) -> dict[str
             result = _aborted_result(cell.cell_id, "interrupted before completion")
             (_cell_artifact_dir(cell)).mkdir(parents=True, exist_ok=True)
             (_cell_artifact_dir(cell) / "result.json").write_text(
-                json.dumps(result, indent=2, sort_keys=True))
-        cells_section.append({
-            "cell_id": cell.cell_id,
-            "verdict": result.get("verdict"),
-            "started_at": result.get("started_at"),
-            "finished_at": result.get("finished_at"),
-            "artifact_dir": str(_cell_artifact_dir(cell)),
-        })
+                json.dumps(result, indent=2, sort_keys=True)
+            )
+        cells_section.append(
+            {
+                "cell_id": cell.cell_id,
+                "verdict": result.get("verdict"),
+                "started_at": result.get("started_at"),
+                "finished_at": result.get("finished_at"),
+                "artifact_dir": str(_cell_artifact_dir(cell)),
+            }
+        )
     matrix["cells"] = cells_section
     matrix["totals"] = schemas.aggregate_totals(matrix["cells"])
     matrix["finished_at"] = _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds")

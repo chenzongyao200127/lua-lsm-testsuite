@@ -19,8 +19,8 @@ from __future__ import annotations
 import hashlib
 import re
 import sys
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
-from typing import Iterable, Sequence
 
 # Lines that look like a stack frame (decoded or otherwise).
 # Examples this should match:
@@ -107,8 +107,11 @@ def _extract_frames(lines: Iterable[str]) -> list[str]:
     return frames
 
 
-def build_signature(decoded_or_raw: Sequence[str], pattern_label: str | None = None,
-                    surrounding_slice: Sequence[str] | None = None) -> Signature:
+def build_signature(
+    decoded_or_raw: Sequence[str],
+    pattern_label: str | None = None,
+    surrounding_slice: Sequence[str] | None = None,
+) -> Signature:
     """Build a stable signature from a list of log/decoded lines.
 
     decoded_or_raw should contain the lines that follow a Call Trace: anchor
@@ -126,14 +129,16 @@ def build_signature(decoded_or_raw: Sequence[str], pattern_label: str | None = N
         rest_clean = [_ADDR_RE.sub("", f).strip() for f in rest]
         payload = top + "\n" + "\n".join(rest_clean)
         digest = hashlib.sha1(payload.encode("utf-8")).hexdigest()
-        return Signature(sha1=digest, kind="primary", top_frame=top, frames=tuple([top, *rest_clean]))
+        return Signature(sha1=digest, kind="primary", top_frame=top, frames=(top, *rest_clean))
 
     # Fallback: no decodable frames.
     slice_text = "\n".join(surrounding_slice if surrounding_slice is not None else decoded_or_raw)
     payload = (pattern_label or "<no-pattern>") + "\n" + slice_text
     short_hash = hashlib.sha256(payload.encode("utf-8")).hexdigest()[:64]
-    digest = hashlib.sha1((pattern_label or "<no-pattern>" + ":" + short_hash).encode("utf-8")).hexdigest()
-    return Signature(sha1=digest, kind="fallback", top_frame=None, frames=tuple())
+    digest = hashlib.sha1(
+        (pattern_label or "<no-pattern>" + ":" + short_hash).encode("utf-8")
+    ).hexdigest()
+    return Signature(sha1=digest, kind="fallback", top_frame=None, frames=())
 
 
 def selftest() -> int:
@@ -199,7 +204,10 @@ def selftest() -> int:
     fallback = build_signature(
         ["random text with no Call Trace frames"],
         pattern_label="watchdog: BUG: soft lockup",
-        surrounding_slice=["watchdog: BUG: soft lockup - CPU#0 stuck for 22s!", "Hardware name: ..."],
+        surrounding_slice=[
+            "watchdog: BUG: soft lockup - CPU#0 stuck for 22s!",
+            "Hardware name: ...",
+        ],
     )
     if fallback.kind != "fallback":
         failures.append(f"fallback kind={fallback.kind} expected=fallback")
@@ -211,7 +219,7 @@ def selftest() -> int:
         for f in failures:
             print(f"  {f}", file=sys.stderr)
         return 1
-    print(f"signature selftest OK (primary stable; fallback distinct)")
+    print("signature selftest OK (primary stable; fallback distinct)")
     return 0
 
 
