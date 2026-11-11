@@ -14,7 +14,7 @@ POLICY ?= hello
 export KERNEL_TREE ROOTFS_IMG KERNEL_IMG DEBUG_KERNEL LUA_LSM_TOOLS WORKSPACE TOOLS_DIR
 
 .PHONY: help sync smoke functional matrix matrix-perf bisect-run image \
-	image-warm kernel-debug test selftest clean distclean
+	image-warm kernel-debug test lint format cov selftest clean distclean
 
 help:
 	@echo "Targets:"
@@ -28,6 +28,9 @@ help:
 	@echo "  image-warm                   pre-warm the rootfs (consume autorelabel; required before perf runs)"
 	@echo "  kernel-debug PROFILE=<name>  invoke vendored enable-debug-kconfig.sh --profile {standard,full}"
 	@echo "  test                         run harness unit tests with $(PYTHON)"
+	@echo "  lint                         ruff check (lint)"
+	@echo "  format                       ruff format (rewrite)"
+	@echo "  cov                          run unit tests with coverage report"
 	@echo "  selftest                     run lightweight in-tree self-tests (classifier patterns, etc.)"
 	@echo "  clean                        remove generated artifacts and caches"
 	@echo "  distclean                    remove generated artifacts and .venv"
@@ -65,6 +68,15 @@ kernel-debug:
 
 test:
 	$(PYTHON) -m pytest
+
+lint:
+	$(UV) run ruff check .
+
+format:
+	$(UV) run ruff format .
+
+cov:
+	$(PYTHON) -m pytest --cov=harness --cov-report=term-missing
 
 selftest:
 	$(PYTHON) -m harness.classifier_patterns --selftest
