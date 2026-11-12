@@ -330,6 +330,44 @@ def test_unixbench_brackets_wrapper_with_register_and_unregister(tmp_path, monke
     assert "echo denyfile > /sys/kernel/security/lua/unregister" in ctx.commands[2]
 
 
+def test_unixbench_policy_none_skips_register_and_unregister(tmp_path, monkeypatch):
+    ctx = _ctx(
+        tmp_path,
+        profile={"guest_artifact_relpath": "runs/x/cell", "policy": "none"},
+    )
+    fake = ssh.SshResult(returncode=0, stdout="", stderr="")
+    monkeypatch.setattr(ssh, "run", MagicMock(return_value=fake))
+    r = workloads.unixbench(ctx.target, ctx)
+    assert r.returncode == 0
+    assert len(ctx.commands) == 1, "policy=none must run only the UnixBench wrapper"
+    assert "lua_lsm_unixbench.sh" in ctx.commands[0]
+    assert "/sys/kernel/security/lua/register" not in ctx.commands[0]
+    assert "/sys/kernel/security/lua/unregister" not in ctx.commands[0]
+
+
+def test_unixbench_guest_local_stages_tree_under_tmp(tmp_path, monkeypatch):
+    ctx = _ctx(
+        tmp_path,
+        profile={
+            "guest_artifact_relpath": "runs/x/cell",
+            "policy": "none",
+            "unixbench_guest_local": True,
+        },
+    )
+    fake = ssh.SshResult(returncode=0, stdout="", stderr="")
+    monkeypatch.setattr(ssh, "run", MagicMock(return_value=fake))
+    monkeypatch.setattr(ssh, "fetch_text", MagicMock(return_value=None))
+    r = workloads.unixbench(ctx.target, ctx)
+    assert r.returncode == 0
+    assert len(ctx.commands) == 2, (
+        "guest-local unixbench must issue exactly two commands: stage + wrapper"
+    )
+    assert "cp -a /mnt/host/unixbench /tmp/c1-unixbench" in ctx.commands[0]
+    assert "lua_lsm_unixbench.sh" in ctx.commands[1]
+    assert "-d /tmp/c1-unixbench" in ctx.commands[1]
+    assert "-o /tmp/c1-lua-lsm-unixbench" in ctx.commands[1]
+
+
 def test_unixbench_unregisters_even_when_wrapper_fails(tmp_path, monkeypatch):
     """Invariant: a wrapper failure must NOT leak a registered policy
     into the next cell. The unregister step is always issued once

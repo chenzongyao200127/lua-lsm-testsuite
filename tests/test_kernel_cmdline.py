@@ -27,6 +27,14 @@ def test_perf_profile_omits_pool_when_unset():
     assert "lua.lvm_pool_max=" not in compose(profile)
 
 
+def test_bench_profile_emits_lsm_without_panic_knobs():
+    profile = {"kind": "bench", "lsm": "capability,yama,lua"}
+    cmdline = compose(profile)
+    assert "lsm=capability,yama,lua" in cmdline
+    for knob in BUGHUNT_KNOBS:
+        assert knob not in cmdline
+
+
 def test_bughunt_profile_emits_panic_knobs():
     profile = {"kind": "bughunt", "lsm": "lua"}
     cmdline = compose(profile)

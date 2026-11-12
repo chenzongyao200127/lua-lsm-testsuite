@@ -46,6 +46,7 @@ SECURITYFS_UNREGISTER = f"{SECURITYFS_LUA}/unregister"
 # "hello" by the file's `return { name = 'hello' }`.
 DEFAULT_SMOKE_POLICY_FILE = "hello.lua"
 DEFAULT_SMOKE_POLICY_NAME = "hello"
+DISABLED_POLICY_SENTINEL = "none"
 
 
 # ---------------------------------------------------------------------------
@@ -114,13 +115,15 @@ def policy_host_path(
     share_dir is None, returns an empty tuple -- the runner can still
     proceed (the bundle just won't carry a policy copy). The default policy
     is workload-specific so the bundle always carries the policy the cell
-    actually exercised.
+    actually exercised. Passing the sentinel policy name "none" also yields
+    an empty tuple: the cell runs without registering any policy (used by
+    the no-policy UnixBench compare configs).
     """
     if share_dir is None:
         return ()
     spec = SPECS.get(workload_name)
     name = policy_name or (spec.default_policy if spec else None)
-    if not name:
+    if _policy_disabled(name):
         return ()
     guest_dir = spec.policy_guest_dir if spec else LUA_LSM_TOOLS_EXAMPLES
     return (Path(share_dir) / guest_dir / normalize_policy_filename(name),)
@@ -142,6 +145,13 @@ def _record(
     result.returncode = ssh_result.returncode
     if ssh_result.returncode != 0 and not result.notes:
         result.notes = f"{result.name} step exited {ssh_result.returncode}"
+
+
+def _policy_disabled(profile_policy: str | None) -> bool:
+    return (
+        isinstance(profile_policy, str)
+        and profile_policy.strip().lower() == DISABLED_POLICY_SENTINEL
+    )
 
 
 def _policy_file_in_guest(profile_policy: str | None) -> str:
@@ -290,6 +300,11 @@ def unixbench(target: ssh.SshTarget, ctx: CellContext) -> WorkloadResult:
 
     Falls back to /tmp output when the cell has no guest_artifact_relpath
     (single-cell ad hoc runs).
+
+    When the profile carries `policy: none`, the workload skips the
+    register/unregister bracket entirely and runs UnixBench with no Lua policy
+    active. This is the baseline path for comparing `lsm=...lua...` against an
+    otherwise identical `lsm=` chain that omits `lua`.
     """
     out = WorkloadResult(name="unixbench")
     wrapper = f"{GUEST_HOST_SHARE}/{LUA_LSM_TOOLS_TOOLS}/lua_lsm_unixbench.sh"
@@ -301,12 +316,29 @@ def unixbench(target: ssh.SshTarget, ctx: CellContext) -> WorkloadResult:
     cpus = int(ctx.profile.get("unixbench_cpus", 1))
     iters = int(ctx.profile.get("unixbench_iters", 1))
     timeout = float(ctx.profile.get("workload_timeout_s", 3600.0))
+    policy_enabled = not _policy_disabled(ctx.profile.get("policy"))
+    guest_local = bool(ctx.profile.get("unixbench_guest_local"))
 
-    policy_path = _policy_file_in_guest(ctx.profile.get("policy"))
-    policy_name = _policy_short_name(ctx.profile.get("policy"))
-    cmd_register = f"cat {shlex.quote(policy_path)} > {shlex.quote(SECURITYFS_REGISTER)}"
-    r_reg = ssh.run(target, cmd_register, timeout_s=30.0)
-    _record(out, ctx, "workload-unixbench.log", cmd_register, r_reg)
+    if guest_local:
+        ub_dir = f"/tmp/{ctx.cell_id}-unixbench"
+        out_dir = f"/tmp/{ctx.cell_id}-lua-lsm-unixbench"
+        cmd_stage = (
+            f"set -euo pipefail; "
+            f"rm -rf {shlex.quote(ub_dir)} {shlex.quote(out_dir)}; "
+            f"cp -a {shlex.quote(f'{GUEST_HOST_SHARE}/{UNIXBENCH_DIR}')} {shlex.quote(ub_dir)}"
+        )
+        r_stage = ssh.run(target, cmd_stage, timeout_s=120.0)
+        _record(out, ctx, "workload-unixbench.log", cmd_stage, r_stage)
+        if r_stage.returncode != 0:
+            return out
+
+    r_reg: ssh.SshResult | None = None
+    if policy_enabled:
+        policy_path = _policy_file_in_guest(ctx.profile.get("policy"))
+        policy_name = _policy_short_name(ctx.profile.get("policy"))
+        cmd_register = f"cat {shlex.quote(policy_path)} > {shlex.quote(SECURITYFS_REGISTER)}"
+        r_reg = ssh.run(target, cmd_register, timeout_s=30.0)
+        _record(out, ctx, "workload-unixbench.log", cmd_register, r_reg)
 
     cmd = (
         f"set -euo pipefail; "
@@ -316,14 +348,16 @@ def unixbench(target: ssh.SshTarget, ctx: CellContext) -> WorkloadResult:
         f"-c {cpus} -i {iters}"
     )
     wrapper_rc: int | None = None
-    if r_reg.returncode == 0:
+    if not policy_enabled or (r_reg is not None and r_reg.returncode == 0):
         r = ssh.run(target, cmd, timeout_s=timeout)
         _record(out, ctx, "workload-unixbench.log", cmd, r)
         wrapper_rc = r.returncode
 
-    cmd_unregister = f"echo {shlex.quote(policy_name)} > {shlex.quote(SECURITYFS_UNREGISTER)}"
-    r_unreg = ssh.run(target, cmd_unregister, timeout_s=30.0)
-    _record(out, ctx, "workload-unixbench.log", cmd_unregister, r_unreg)
+    r_unreg: ssh.SshResult | None = None
+    if policy_enabled:
+        cmd_unregister = f"echo {shlex.quote(policy_name)} > {shlex.quote(SECURITYFS_UNREGISTER)}"
+        r_unreg = ssh.run(target, cmd_unregister, timeout_s=30.0)
+        _record(out, ctx, "workload-unixbench.log", cmd_unregister, r_unreg)
 
     # Result-code precedence: register failure > wrapper failure > unregister
     # failure. _record() overwrites out.returncode on every call, so we
@@ -332,18 +366,28 @@ def unixbench(target: ssh.SshTarget, ctx: CellContext) -> WorkloadResult:
     # The register failure is the real story (no policy means the whole
     # perf delta is meaningless), and a wrapper failure must not be masked
     # by a successful unregister overwriting it.
-    if r_reg.returncode != 0:
+    if not policy_enabled:
+        out.returncode = wrapper_rc or 0
+        if wrapper_rc not in (None, 0):
+            out.notes = f"unixbench step exited {wrapper_rc}"
+    elif r_reg is not None and r_reg.returncode != 0:
         out.returncode = r_reg.returncode
         out.notes = f"unixbench register exited {r_reg.returncode}"
     elif wrapper_rc not in (None, 0):
         out.returncode = wrapper_rc
         if not out.notes:
             out.notes = f"unixbench step exited {wrapper_rc}"
-    elif r_unreg.returncode != 0:
+    elif r_unreg is not None and r_unreg.returncode != 0:
         out.returncode = r_unreg.returncode
         out.notes = f"unixbench unregister exited {r_unreg.returncode}"
     else:
         out.returncode = 0
+
+    if guest_local:
+        for name in ("system.txt", "command.txt", "unixbench.log"):
+            text = ssh.fetch_text(target, f"{out_dir}/{name}")
+            if text is not None:
+                (ctx.artifact_dir / name).write_text(text)
 
     if cell_rel:
         _normalize_unixbench_layout(ctx.artifact_dir)

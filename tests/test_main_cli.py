@@ -32,6 +32,33 @@ def test_functional_policy_resolves_to_repository_fixture(tmp_path):
     assert paths == (tmp_path / "lua-lsm-testsuite" / "fixtures" / "policies" / "smoke.lua",)
 
 
+def test_artifact_guest_relpath_prefers_share_dir_root(tmp_path):
+    workspace = tmp_path
+    repo = workspace / "lua-lsm-testsuite"
+    artifact = repo / "runs" / "cell-1"
+    artifact.mkdir(parents=True)
+    rel = cell_runner.derive_guest_relpath(
+        artifact,
+        workspace_root=repo,
+        override=None,
+        share_dir=workspace,
+    )
+    assert rel == "lua-lsm-testsuite/runs/cell-1"
+
+
+def test_artifact_guest_relpath_falls_back_to_workspace_root(tmp_path):
+    repo = tmp_path
+    artifact = repo / "runs" / "cell-1"
+    artifact.mkdir(parents=True)
+    rel = cell_runner.derive_guest_relpath(
+        artifact,
+        workspace_root=repo,
+        override=None,
+        share_dir=None,
+    )
+    assert rel == "runs/cell-1"
+
+
 def test_run_help_does_not_touch_host():
     with pytest.raises(SystemExit) as ctx:
         cli.main(["--help"])

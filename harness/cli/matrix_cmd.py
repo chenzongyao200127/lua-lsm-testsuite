@@ -27,7 +27,9 @@ def build_cell_runner_callback(
     """
 
     def _runner(cell: matrix.CellSpec, artifact_dir: Path, port: int) -> dict[str, Any]:
-        guest_rel = cell_runner.derive_guest_relpath(artifact_dir, workspace_root, None)
+        guest_rel = cell_runner.derive_guest_relpath(
+            artifact_dir, workspace_root, None, share_dir=getattr(args, "share_dir", None)
+        )
         profile = dict(cell.profile)
         profile.setdefault("workload_timeout_s", args.workload_timeout)
         profile["guest_artifact_relpath"] = guest_rel

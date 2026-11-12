@@ -121,9 +121,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     pr.add_argument("--workload", default="smoke", choices=sorted(workloads.REGISTRY))
     pr.add_argument(
-        "--policy", default=None, help="policy file under the workload's fixture or tools directory"
+        "--policy",
+        default=None,
+        help=(
+            "policy file under the workload's fixture or tools directory "
+            "(pass 'none' to skip policy registration for unixbench)"
+        ),
     )
-    pr.add_argument("--kind", default="bughunt", choices=("perf", "bughunt"))
+    pr.add_argument("--kind", default="bughunt", choices=("perf", "bughunt", "bench"))
     pr.add_argument("--lsm", default=None, help="lsm chain string passed to the kernel cmdline")
     pr.add_argument("--lvm-pool-max", type=int, default=None)
     pr.add_argument("--nodebug", action="store_true")

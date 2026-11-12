@@ -54,7 +54,9 @@ def cmd_run(args: argparse.Namespace) -> int:
         {"kind": args.kind, "workload": args.workload}, args.workload
     )
     artifact_dir = runs_root / cell_id
-    guest_rel = cell_runner.derive_guest_relpath(artifact_dir, workspace_root, None)
+    guest_rel = cell_runner.derive_guest_relpath(
+        artifact_dir, workspace_root, None, share_dir=args.share_dir
+    )
 
     profile = common.profile_from_run_args(args)
     profile["guest_artifact_relpath"] = guest_rel

@@ -1,0 +1,21 @@
+{
+  "name": "unixbench-no-policy-compare",
+  "workload": "unixbench",
+  "defaults": {
+    "kind": "bench",
+    "kvm_required": true,
+    "policy": "none",
+    "nodebug": true,
+    "unixbench_guest_local": true,
+    "unixbench_cpus": 1,
+    "unixbench_iters": 1
+  },
+  "axes": {
+    "lsm": [
+      "capability,yama,lua,selinux,bpf,integrity",
+      "capability,yama,selinux,bpf,integrity"
+    ],
+    "rep": [1, 2, 3]
+  },
+  "exclude": []
+}

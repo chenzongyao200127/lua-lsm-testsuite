@@ -155,7 +155,9 @@ def _cmd_bisect_run_single_cell(args: argparse.Namespace) -> int:
         cell_id = str(cell_id_override)
     artifact_dir = runs_root / cell_id
 
-    guest_rel = cell_runner.derive_guest_relpath(artifact_dir, workspace_root, None)
+    guest_rel = cell_runner.derive_guest_relpath(
+        artifact_dir, workspace_root, None, share_dir=getattr(args, "share_dir", None)
+    )
 
     profile_doc.setdefault("workload_timeout_s", args.workload_timeout)
     profile_doc["guest_artifact_relpath"] = guest_rel

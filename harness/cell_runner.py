@@ -214,17 +214,34 @@ def _check_workload_fixture(
 
 
 def derive_guest_relpath(
-    artifact_dir: Path, workspace_root: Path | None, override: str | None
+    artifact_dir: Path,
+    workspace_root: Path | None,
+    override: str | None,
+    share_dir: Path | None = None,
 ) -> str | None:
+    """Map a host artifact dir to its guest-visible path under /mnt/host.
+
+    When a share_dir is configured, the guest sees that directory as the root
+    of /mnt/host, so paths are made relative to share_dir first; falling back
+    to workspace_root preserves the old behavior for local runs that do not
+    pass --share-dir. ``override`` (an explicit guest relpath) always wins.
+    """
     if override is not None:
         return override
-    if workspace_root is None:
+    roots: tuple[Path, ...]
+    if share_dir is not None:
+        roots = (Path(share_dir), Path(workspace_root)) if workspace_root else (Path(share_dir),)
+    elif workspace_root is not None:
+        roots = (Path(workspace_root),)
+    else:
         return None
-    try:
-        rel = Path(artifact_dir).resolve().relative_to(Path(workspace_root).resolve())
-    except ValueError:
-        return None
-    return str(rel)
+    artifact_resolved = Path(artifact_dir).resolve()
+    for root in roots:
+        try:
+            return str(artifact_resolved.relative_to(root.resolve()))
+        except ValueError:
+            continue
+    return None
 
 
 def _start_dmesg_follower(target: ssh.SshTarget, guest_rel: str) -> None:
