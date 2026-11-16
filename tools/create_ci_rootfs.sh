@@ -51,7 +51,7 @@ mkfs.ext4 -q -F "$OUTPUT"
 mount -o loop "$OUTPUT" "$MNT"
 
 debootstrap --variant=minbase \
-    --include=openssh-server,systemd,systemd-sysv,util-linux,bash,grep,mawk,coreutils,iproute2 \
+    --include=openssh-server,systemd,systemd-sysv,udev,util-linux,bash,grep,mawk,coreutils,iproute2 \
     "$SUITE" "$MNT" "$MIRROR"
 
 echo "lua-ci" > "$MNT/etc/hostname"
@@ -79,7 +79,15 @@ Name=en* eth*
 DHCP=yes
 EOF
 
-chroot "$MNT" systemctl enable ssh.service systemd-networkd.service >/dev/null 2>&1
+# debootstrap's chroot lacks /run/systemd/system, so systemd's postinst
+# skips preset-all; enable every unit the boot needs explicitly.
+chroot "$MNT" systemctl enable \
+    ssh.service \
+    systemd-networkd.service \
+    systemd-udevd.service \
+    systemd-udevd-control.socket \
+    systemd-udevd-kernel.socket \
+    systemd-udev-trigger.service >/dev/null 2>&1
 
 # Trim the image: apt caches and docs are dead weight in CI.
 rm -rf "$MNT/var/cache/apt/archives/"*.deb "$MNT/var/lib/apt/lists/"* \
