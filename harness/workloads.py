@@ -42,10 +42,8 @@ SECURITYFS_LUA = "/sys/kernel/security/lua"
 SECURITYFS_REGISTER = f"{SECURITYFS_LUA}/register"
 SECURITYFS_UNREGISTER = f"{SECURITYFS_LUA}/unregister"
 
-# Default smoke policy: hello.lua is the canonical example, registered as
-# "hello" by the file's `return { name = 'hello' }`.
+# Default smoke policy: hello.lua is the canonical example.
 DEFAULT_SMOKE_POLICY_FILE = "hello.lua"
-DEFAULT_SMOKE_POLICY_NAME = "hello"
 DISABLED_POLICY_SENTINEL = "none"
 
 
@@ -77,12 +75,6 @@ class WorkloadSpec:
 
 
 SPECS: dict[str, WorkloadSpec] = {}  # populated after the workload functions below
-
-
-def spec_for(name: str) -> WorkloadSpec:
-    if name not in SPECS:
-        raise KeyError(f"unknown workload: {name}; known: {sorted(SPECS)}")
-    return SPECS[name]
 
 
 def normalize_policy_filename(name: str) -> str:

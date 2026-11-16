@@ -119,7 +119,6 @@ lua-lsm-testsuite/
   harness/              Python sources (cell_runner, classifier, bundler, ...)
   configs/              YAML cell and matrix profiles
   tools/                vendored VM launcher and host-side helper scripts
-  patches/              legacy external-launcher patches (kept for reference)
   runs/                 per-cell artifact directories (gitignored)
   out/                  ad hoc local reports/results (gitignored)
   scripts/              reproducible operator helpers (linux-kvm-dry-run.sh)

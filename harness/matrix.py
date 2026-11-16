@@ -194,10 +194,6 @@ def assert_share_dir(share_dir: Path, required_entries: tuple[str, ...] | None =
 DEFAULT_PORT_BASE = 10023
 
 
-class PortCollisionError(ValueError):
-    pass
-
-
 def allocate_ports(n: int, base: int = DEFAULT_PORT_BASE) -> list[int]:
     """Return n distinct ports starting at base.
 

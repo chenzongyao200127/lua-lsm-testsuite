@@ -11,9 +11,6 @@ Fixture map:
     linux_host        forces hostenv.detect (and cell_runner.detect) to
                       report Linux + KVM regardless of the real host
     fake_ssh          an ssh.run recorder returning rc=0
-    cell_ctx          a CellContext over tmp_path
-    share_dir         a fake 9p workspace with the load-bearing trees
-    tmp_cwd           a temporary working directory
 """
 
 from __future__ import annotations
@@ -23,7 +20,6 @@ from unittest.mock import MagicMock
 
 import pytest
 from harness import cell_runner, hostenv, qemu, ssh
-from harness.celltypes import CellContext
 
 _LINUX_HOST = hostenv.HostEnv(system="Linux", release="6.10.0", has_kvm=True)
 
@@ -83,37 +79,3 @@ def fake_ssh(monkeypatch):
     return recorder
 
 
-@pytest.fixture
-def cell_ctx(tmp_path):
-    """A CellContext over tmp_path with a minimal perf profile."""
-    return CellContext(
-        cell_id="test-cell",
-        artifact_dir=tmp_path,
-        target=ssh.SshTarget(host="127.0.0.1", port=10023, user="root", key_path=Path("/dev/null")),
-        profile={"kind": "perf", "lsm": "capability,bpf,lua", "lvm_pool_max": 16},
-    )
-
-
-@pytest.fixture
-def share_dir(tmp_path) -> Path:
-    """A fake 9p host_share workspace with the load-bearing trees.
-
-    Mirrors what matrix.assert_share_dir requires plus the fixture files
-    the workloads' guest-side checks look for (workload lua policies and
-    helper scripts).
-    """
-    tools = tmp_path / "lua-lsm-tools"
-    (tools / "examples").mkdir(parents=True)
-    (tools / "examples" / "hello.lua").write_text("-- fixture policy\n")
-    (tools / "tools").mkdir(parents=True)
-    for name in ("bench.lua", "lua_lsm_unixbench.sh", "verify_module_cleanup.sh"):
-        (tools / "tools" / name).write_text("#!/bin/sh\n")
-    (tmp_path / "kernel" / "linux").mkdir(parents=True)
-    return tmp_path
-
-
-@pytest.fixture
-def tmp_cwd(tmp_path, monkeypatch):
-    """Run the test with cwd inside a temporary directory."""
-    monkeypatch.chdir(tmp_path)
-    return tmp_path

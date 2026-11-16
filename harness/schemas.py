@@ -16,25 +16,6 @@ from typing import Any
 
 SCHEMA_VERSION = 1
 
-# Verdicts the harness may produce. SKIP-class verdicts begin with the literal
-# prefix "skip:" so downstream tooling (TAP emitter, matrix aggregator) can
-# recognise them by prefix without an enumeration check.
-VERDICTS = (
-    "pass",
-    "kernel-bug",
-    "no-dmesg",
-    "boot-timeout",
-    "aborted",
-    "workload-fail",
-    "skip:stats-unavailable",
-    "skip:no-kvm",
-    "skip:no-lkdtm",
-    "skip:image-not-warm",
-    "skip:fixture-missing",
-    "build-fail",
-    "harness-error",
-)
-
 # Verdicts treated as TAP-level FAIL. workload-fail covers the case where a
 # guest-side workload (smoke registration, verify_module_cleanup, bench,
 # unixbench, etc.) returned a non-zero exit code but the kernel produced no
@@ -51,9 +32,9 @@ FAIL_VERDICTS = frozenset(
     }
 )
 
-# Verdicts treated as TAP-level SKIP. With "stats-unavailable" renamed to
-# "skip:stats-unavailable", every skip verdict carries the "skip:" prefix.
-SKIP_VERDICT_PREFIXES = ("skip:",)
+# SKIP-class verdicts begin with the literal prefix "skip:" so downstream
+# tooling (TAP emitter, matrix aggregator) can recognise them by prefix
+# without an enumeration check.
 
 
 def is_skip(verdict: str) -> bool:
