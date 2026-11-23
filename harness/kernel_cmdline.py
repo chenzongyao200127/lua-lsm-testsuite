@@ -8,11 +8,17 @@ Profile shape (Python dict):
         "lvm_pool_max": int | None,           # optional; only emitted if not None
         "nodebug": bool,                      # optional; default False
         "extra": [str, ...],                  # optional; appended verbatim
+        "panic_on_warn": bool,                # optional; bughunt only, default True
     }
 
 The composer is deliberately strict: a perf cell that already carries any of
 the bug-hunt knobs is rejected so that timing comparisons are not silently
 distorted by panic_on_warn / oops=panic.
+
+A bughunt cell may set panic_on_warn=False to drop the panic knobs; the
+matrix is then expected to baseline known base-kernel splat noise through
+`known_splats` (consumed by cell_runner) instead of relying on an in-guest
+panic to stop the run.
 """
 
 from __future__ import annotations
@@ -64,7 +70,7 @@ def compose(profile: Mapping) -> str:
     if profile.get("nodebug"):
         parts.append("lua.nodebug")
 
-    if kind == "bughunt":
+    if kind == "bughunt" and profile.get("panic_on_warn", True):
         parts.extend(BUGHUNT_KNOBS)
 
     parts.extend(extra_list)

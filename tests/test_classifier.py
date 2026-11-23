@@ -1,6 +1,6 @@
 """Unit tests for dmesg log classification (harness.classifier)."""
 
-from harness.classifier import classify_files, classify_text
+from harness.classifier import classify_files, classify_text, split_ignored
 from harness.classifier_patterns import PATTERN_VERSION, PATTERNS, selftest
 
 
@@ -73,3 +73,25 @@ def test_pattern_version_exposed():
 
 def test_builtin_selftest_returns_zero():
     assert selftest() == 0
+
+
+def test_split_ignored_baselines_matching_header_only():
+    log = "\n".join(
+        [
+            "[    7.4] BUG: KCSAN: data-race in folio_batch_move_lru / next_uptodate_folio",
+            "[    9.0] BUG: KASAN: use-after-free in lua_module_unregister+0x18/0x40",
+        ]
+    )
+    hits = classify_text(log)
+    fatal, ignored = split_ignored(hits, [r"BUG: KCSAN: data-race in folio_batch_move_lru"])
+    assert [h.pattern for h in ignored] == ["BUG: KCSAN"]
+    assert [h.pattern for h in fatal] == ["BUG: KASAN"]
+    # The full line is preserved so baselines can anchor past the label.
+    assert ignored[0].text.startswith("[    7.4] BUG: KCSAN: data-race in")
+
+
+def test_split_ignored_without_baselines_keeps_everything():
+    hits = classify_text("BUG: KCSAN: data-race in a / b\n")
+    fatal, ignored = split_ignored(hits, ())
+    assert fatal == hits
+    assert ignored == []

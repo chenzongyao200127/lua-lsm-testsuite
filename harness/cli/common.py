@@ -149,6 +149,7 @@ def build_cell_inputs(
         rootfs_image=getattr(args, "rootfs", None),
         decode_script=getattr(args, "decode_script", None),
         policy_paths=policy_paths,
+        known_splats=tuple(profile.get("known_splats") or ()),
     )
 
 

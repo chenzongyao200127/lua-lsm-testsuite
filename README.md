@@ -75,6 +75,10 @@ make perf-report     # markdown table + per-policy medians from runs/
   is rejected, every unregister drains, and the module list ends clean.
   Kernel splats are what fail the cell, so use the debug fragment in
   `kernel.config.concurrency` (KCSAN + PROVE_LOCKING + PREEMPT).
+  A matrix can set `panic_on_warn: false` to keep the guest alive past
+  base-kernel warnings and list `known_splats` (regexes matched against the
+  full splat header line) for noise it wants baselined; matching hits are
+  recorded under `ignored_splats`, every other hit still fails the cell.
 - **Policies** (`workload: policy-suite` + `discover`): matrix discovery
   expands one cell per discovered `.lua`, so adding a policy to the kernel
   repo's `.github/ci/policies/` directory is enough to get it tested. The

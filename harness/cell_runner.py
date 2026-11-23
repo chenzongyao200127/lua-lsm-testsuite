@@ -98,6 +98,9 @@ class CellInputs:
     rootfs_image: Path | None = None
     decode_script: Path | None = None
     policy_paths: tuple[Path, ...] = field(default_factory=tuple)
+    # Regexes for known base-kernel splat headers; matching classifier hits
+    # are recorded as ignored_splats instead of failing the cell.
+    known_splats: tuple[str, ...] = field(default_factory=tuple)
     # Override path for the rootfs warm-marker; when None and rootfs_image is
     # set, the runner derives `<rootfs_image>.warm-marker` to match the
     # convention used by the `image-warm` CLI helper.
@@ -599,7 +602,9 @@ def _classify_and_finalize(
     paths = [p for p in (serial_log, dmesg_log) if p.exists() and p.stat().st_size > 0]
     hits = classifier.classify_files(paths)
     result["classifier_pattern_version"] = classifier_patterns.PATTERN_VERSION
-    result["classifier_hits"] = [h.__dict__ if hasattr(h, "__dict__") else h for h in hits]
+    fatal_hits, ignored_hits = classifier.split_ignored(hits, inputs.known_splats)
+    result["classifier_hits"] = [h.to_dict() for h in fatal_hits]
+    result["ignored_splats"] = [h.to_dict() for h in ignored_hits]
 
     # Tertiary audit-trail parse: classify the in-guest journalctl capture
     # with the same pattern set so a triage script can spot splat headers
@@ -608,12 +613,10 @@ def _classify_and_finalize(
     journal_log = art / "journalctl-kb.txt"
     if journal_log.exists() and journal_log.stat().st_size > 0:
         journal_hits = classifier.classify_files([journal_log])
-        result["journalctl_hits"] = [
-            h.__dict__ if hasattr(h, "__dict__") else h for h in journal_hits
-        ]
+        result["journalctl_hits"] = [h.to_dict() for h in journal_hits]
 
     if result["verdict"] is None:
-        if hits:
+        if fatal_hits:
             result["verdict"] = "kernel-bug"
         elif (
             workload_returncode is not None
@@ -652,7 +655,7 @@ def _classify_and_finalize(
     # Bisect bundle: emit when the classifier saw a real splat AND the caller
     # wired a BundleStore. Skipping when bundle_store is None keeps unit tests
     # and ad-hoc single-cell runs lean.
-    if hits and inputs.bundle_store is not None:
+    if fatal_hits and inputs.bundle_store is not None:
         try:
             bundle_meta = _emit_bundle(result, art, inputs)
             if bundle_meta is not None:

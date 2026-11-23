@@ -69,3 +69,11 @@ def test_compose_env_preserves_base_env():
     assert env["PATH"] == "/usr/bin"
     assert env["HOST_SSH_PORT"] == "10024"
     assert "lsm=lua" in env["EXTRA_CMDLINE"]
+
+
+def test_bughunt_panic_knobs_can_be_disabled():
+    profile = {"kind": "bughunt", "lsm": "lua", "panic_on_warn": False}
+    cmdline = compose(profile)
+    for knob in BUGHUNT_KNOBS:
+        assert knob not in cmdline
+    assert "lsm=lua" in cmdline

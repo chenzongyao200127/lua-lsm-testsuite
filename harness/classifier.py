@@ -1,14 +1,18 @@
 """Classify a captured kernel log against the anchored splat-header pattern set.
 
-A "hit" is recorded as {pattern, line, substring} where:
+A "hit" is recorded as {pattern, line, substring, text} where:
 - pattern is the human-readable label from classifier_patterns
 - line is 1-based line number in the input
 - substring is the matched span text
+- text is the full log line; `known_splats` baselines match against it, so a
+  headline that starts with a stable splat header can be ignored by matrix
+  config without widening the anchored pattern set
 """
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+import re
+from collections.abc import Iterable, Sequence
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
@@ -20,9 +24,34 @@ class ClassifierHit:
     pattern: str
     line: int
     substring: str
+    text: str = ""
 
     def to_dict(self) -> dict:
         return asdict(self)
+
+
+def split_ignored(
+    hits: Sequence[ClassifierHit], known_splats: Iterable[str]
+) -> tuple[list[ClassifierHit], list[ClassifierHit]]:
+    """Partition hits into (fatal, ignored) by `known_splats` regex matches.
+
+    `known_splats` comes from matrix config and is meant for splat headers
+    that are known base-kernel noise (e.g. a KCSAN report in mm code that
+    fires on every boot of the debug kernel). A hit is ignored only when one
+    of the patterns matches its full log line; everything else stays fatal
+    so real regressions are still caught.
+    """
+    patterns = [re.compile(p) for p in known_splats]
+    if not patterns:
+        return list(hits), []
+    fatal: list[ClassifierHit] = []
+    ignored: list[ClassifierHit] = []
+    for hit in hits:
+        if any(p.search(hit.text) for p in patterns):
+            ignored.append(hit)
+        else:
+            fatal.append(hit)
+    return fatal, ignored
 
 
 def classify_lines(lines: Iterable[str]) -> list[ClassifierHit]:
@@ -32,7 +61,14 @@ def classify_lines(lines: Iterable[str]) -> list[ClassifierHit]:
         for cp in PATTERNS:
             m = cp.regex.search(text)
             if m:
-                hits.append(ClassifierHit(pattern=cp.label, line=lineno, substring=m.group(0)))
+                hits.append(
+                    ClassifierHit(
+                        pattern=cp.label,
+                        line=lineno,
+                        substring=m.group(0),
+                        text=text,
+                    )
+                )
                 break  # one hit per line is enough
     return hits
 
@@ -62,6 +98,7 @@ def classify_files(paths: Iterable[Path]) -> list[ClassifierHit]:
                     pattern=hit.pattern,
                     line=hit.line + line_offset,
                     substring=hit.substring,
+                    text=hit.text,
                 )
             )
         line_offset += text.count("\n") + 1

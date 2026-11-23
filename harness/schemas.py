@@ -137,6 +137,7 @@ def empty_result(cell_id: str) -> dict[str, Any]:
         "reason": None,
         "classifier_hits": [],
         "classifier_pattern_version": None,
+        "ignored_splats": [],
         "journalctl_hits": [],
         "perf": {"snapshots": None, "deltas": None},
         "artifacts": {
