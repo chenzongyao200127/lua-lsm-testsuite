@@ -177,6 +177,67 @@ def test_share_dir_accepts_valid_workspace(tmp_path):
 def test_share_dir_requirement_is_workload_aware():
     assert matrix.required_share_entries(["functional"]) == ("lua-lsm-testsuite",)
     assert matrix.required_share_entries(["functional", "smoke"]) == matrix.REQUIRED_SHARE_ENTRIES
+    assert matrix.required_share_entries(["concurrency", "policy-suite"]) == (
+        "lua-lsm-testsuite",
+    )
+
+
+def test_expand_discover_resolves_guest_paths(tmp_path):
+    policy_dir = tmp_path / "kernel" / "linux" / ".github" / "ci" / "policies"
+    policy_dir.mkdir(parents=True)
+    (policy_dir / "b.lua").write_text("return { name = 'b' }\n")
+    (policy_dir / "a.lua").write_text("return { name = 'a' }\n")
+    (policy_dir / "notes.txt").write_text("ignored\n")
+
+    plan = matrix.expand(
+        {
+            "name": "policies",
+            "workload": "policy-suite",
+            "discover": {
+                "policy": [{"dir": "kernel/linux/.github/ci/policies", "pattern": "*.lua"}]
+            },
+        },
+        discover_root=tmp_path,
+    )
+    assert [c.profile["policy"] for c in plan] == [
+        "/mnt/host/kernel/linux/.github/ci/policies/a.lua",
+        "/mnt/host/kernel/linux/.github/ci/policies/b.lua",
+    ]
+    # Cell ids use the policy stem, not the full guest path.
+    assert [c.cell_id for c in plan] == ["policies-a", "policies-b"]
+
+
+def test_expand_discover_requires_share_dir(tmp_path):
+    with pytest.raises(ValueError, match="--share-dir"):
+        matrix.expand(
+            {
+                "name": "policies",
+                "discover": {"policy": [{"dir": "policies"}]},
+            }
+        )
+
+
+def test_expand_discover_rejects_empty_match(tmp_path):
+    (tmp_path / "policies").mkdir()
+    with pytest.raises(ValueError, match="matched no files"):
+        matrix.expand(
+            {"name": "p", "discover": {"policy": [{"dir": "policies"}]}},
+            discover_root=tmp_path,
+        )
+
+
+def test_expand_discover_rejects_axis_overlap(tmp_path):
+    (tmp_path / "policies").mkdir()
+    (tmp_path / "policies" / "a.lua").write_text("x")
+    with pytest.raises(ValueError, match="both"):
+        matrix.expand(
+            {
+                "name": "p",
+                "axes": {"policy": ["manual"]},
+                "discover": {"policy": [{"dir": "policies"}]},
+            },
+            discover_root=tmp_path,
+        )
 
 
 # ---------------------------------------------------------------------------

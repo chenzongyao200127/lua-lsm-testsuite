@@ -62,7 +62,69 @@ def _slug(value: Any) -> str:
     return re.sub(r"[^A-Za-z0-9._-]", "_", s)
 
 
-def expand(matrix_doc: Mapping[str, Any]) -> list[CellSpec]:
+def _axis_slug(axis: str, value: Any) -> str:
+    """Cell-id fragment for one axis value.
+
+    Policy axes may carry absolute guest paths (e.g. a PR-local policy under
+    `.github/ci/policies/`); rendering the whole path would produce a long,
+    unreadable cell id, so use the file stem instead.
+    """
+    if axis == "policy" and isinstance(value, str) and "/" in value:
+        return _slug(Path(value).stem)
+    return _slug(value)
+
+
+def _expand_discovered_axes(
+    doc: Mapping[str, Any], discover_root: Path | None
+) -> dict[str, list[str]]:
+    """Expand `discover` directives into axis value lists.
+
+    Each entry maps an axis name to one or more `{dir, pattern}` (or plain
+    directory string) globs resolved under `discover_root` (the harness
+    workspace / share-dir). Matches become absolute guest paths under the
+    9p host share, so the workload registers the real file.
+
+    The harness refuses to plan discovery without a workspace root: the host
+    glob and the guest path must resolve against the same tree.
+    """
+    discover = doc.get("discover") or {}
+    if not discover:
+        return {}
+    if discover_root is None:
+        raise ValueError(
+            "matrix uses 'discover' but no --share-dir was provided; "
+            "pass --share-dir so host globs and guest paths resolve in the same tree"
+        )
+    root = Path(discover_root)
+    expanded: dict[str, list[str]] = {}
+    for axis, entries in discover.items():
+        if isinstance(entries, str):
+            entries = [{"dir": entries}]
+        values: list[str] = []
+        for entry in entries:
+            rel_dir = str(entry["dir"]).strip("/")
+            pattern = str(entry.get("pattern", "*.lua"))
+            host_dir = root / rel_dir
+            matches = sorted(host_dir.glob(pattern))
+            if not matches:
+                raise ValueError(
+                    f"discover for axis {axis!r} matched no files: "
+                    f"{host_dir}/{pattern}"
+                )
+            for path in matches:
+                if not path.is_file():
+                    continue
+                rel = path.relative_to(host_dir).as_posix()
+                values.append(f"/mnt/host/{rel_dir}/{rel}")
+        if not values:
+            raise ValueError(f"discover for axis {axis!r} produced no policy files")
+        expanded[axis] = values
+    return expanded
+
+
+def expand(
+    matrix_doc: Mapping[str, Any], discover_root: Path | None = None
+) -> list[CellSpec]:
     """Expand a matrix YAML doc into concrete CellSpec entries.
 
     Recognised top-level keys:
@@ -70,6 +132,8 @@ def expand(matrix_doc: Mapping[str, Any]) -> list[CellSpec]:
     - `defaults`: dict of profile keys applied to every cell unless overridden.
     - `axes`: dict of axis_name -> list of values; the cartesian product yields
       one cell per combination.
+    - `discover`: dict of axis_name -> glob entries resolved under
+      `discover_root`; merged into `axes` at plan time.
     - `exclude`: list of dicts; any cell matching all keys of an exclude rule
       (after axis expansion) is dropped.
     - `workload`: default workload name; can be overridden per-axis-row by an
@@ -80,7 +144,12 @@ def expand(matrix_doc: Mapping[str, Any]) -> list[CellSpec]:
     """
     name = str(matrix_doc.get("name", "matrix"))
     defaults = dict(matrix_doc.get("defaults", {}))
-    axes = matrix_doc.get("axes", {}) or {}
+    axes = dict(matrix_doc.get("axes", {}) or {})
+    discovered = _expand_discovered_axes(matrix_doc, discover_root)
+    for axis, values in discovered.items():
+        if axis in axes:
+            raise ValueError(f"axis {axis!r} defined in both 'axes' and 'discover'")
+        axes[axis] = values
     excludes = list(matrix_doc.get("exclude", []) or [])
     default_workload = str(matrix_doc.get("workload", defaults.get("workload", "smoke")))
 
@@ -96,6 +165,7 @@ def expand(matrix_doc: Mapping[str, Any]) -> list[CellSpec]:
     axis_values = [axes[k] for k in axis_keys]
 
     out: list[CellSpec] = []
+    seen_ids: dict[str, int] = {}
     for combo in itertools.product(*axis_values):
         profile = dict(defaults)
         for key, value in zip(axis_keys, combo):
@@ -103,8 +173,13 @@ def expand(matrix_doc: Mapping[str, Any]) -> list[CellSpec]:
         if _matches_any(profile, excludes):
             continue
         workload = str(profile.get("workload", default_workload))
-        summary = "-".join(_slug(profile[k]) for k in axis_keys)
+        summary = "-".join(_axis_slug(k, profile[k]) for k in axis_keys)
         cell_id = f"{name}-{summary}"
+        if cell_id in seen_ids:
+            seen_ids[cell_id] += 1
+            cell_id = f"{cell_id}-{seen_ids[cell_id]}"
+        else:
+            seen_ids[cell_id] = 1
         out.append(CellSpec(cell_id=cell_id, profile=profile, workload=workload))
     return out
 
@@ -119,12 +194,14 @@ class MatrixPlan:
     cells: list[CellSpec] = field(default_factory=list)
 
 
-def plan_from_file(matrix_path: Path) -> MatrixPlan:
+def plan_from_file(matrix_path: Path, discover_root: Path | None = None) -> MatrixPlan:
     """Load and expand a matrix from a YAML file.
 
-    PyYAML is required at runtime; if unavailable, fall back to a JSON loader
-    so the smoke matrix can still be expressed as JSON for environments where
-    pyyaml isn't pre-installed (CI containers, minimal dev hosts).
+    `discover_root` is the workspace used to resolve `discover` globs (the
+    CLI passes its --share-dir). PyYAML is required at runtime; if
+    unavailable, fall back to a JSON loader so the smoke matrix can still be
+    expressed as JSON for environments where pyyaml isn't pre-installed
+    (CI containers, minimal dev hosts).
     """
     text = Path(matrix_path).read_text()
     doc: Mapping[str, Any]
@@ -139,7 +216,7 @@ def plan_from_file(matrix_path: Path) -> MatrixPlan:
     else:
         doc = json.loads(text)
     name = str(doc.get("name") or matrix_path.stem)
-    return MatrixPlan(name=name, cells=expand({**doc, "name": name}))
+    return MatrixPlan(name=name, cells=expand({**doc, "name": name}, discover_root))
 
 
 # ---------------------------------------------------------------------------

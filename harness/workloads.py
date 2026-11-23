@@ -117,6 +117,14 @@ def policy_host_path(
     name = policy_name or (spec.default_policy if spec else None)
     if _policy_disabled(name):
         return ()
+    # Absolute guest paths under the 9p share (used by PR-local policies and
+    # discovered fixtures) map back to the same file on the host. A bare host
+    # absolute path is passed through unchanged.
+    guest_prefix = f"{GUEST_HOST_SHARE}/"
+    if isinstance(name, str) and name.startswith(guest_prefix):
+        return (Path(share_dir) / name[len(guest_prefix):],)
+    if isinstance(name, str) and "/" in name:
+        return (Path(name),)
     guest_dir = spec.policy_guest_dir if spec else LUA_LSM_TOOLS_EXAMPLES
     return (Path(share_dir) / guest_dir / normalize_policy_filename(name),)
 
@@ -299,7 +307,7 @@ def unixbench(target: ssh.SshTarget, ctx: CellContext) -> WorkloadResult:
     otherwise identical `lsm=` chain that omits `lua`.
     """
     out = WorkloadResult(name="unixbench")
-    wrapper = f"{GUEST_HOST_SHARE}/{LUA_LSM_TOOLS_TOOLS}/lua_lsm_unixbench.sh"
+    wrapper = f"{GUEST_HOST_SHARE}/{LUA_LSM_TESTSUITE_FIXTURES}/guest/unixbench.sh"
     ub_dir = f"{GUEST_HOST_SHARE}/{UNIXBENCH_DIR}"
 
     cell_rel = ctx.profile.get("guest_artifact_relpath")
@@ -310,6 +318,7 @@ def unixbench(target: ssh.SshTarget, ctx: CellContext) -> WorkloadResult:
     timeout = float(ctx.profile.get("workload_timeout_s", 3600.0))
     policy_enabled = not _policy_disabled(ctx.profile.get("policy"))
     guest_local = bool(ctx.profile.get("unixbench_guest_local"))
+    build = bool(ctx.profile.get("unixbench_build"))
 
     if guest_local:
         ub_dir = f"/tmp/{ctx.cell_id}-unixbench"
@@ -317,7 +326,9 @@ def unixbench(target: ssh.SshTarget, ctx: CellContext) -> WorkloadResult:
         cmd_stage = (
             f"set -euo pipefail; "
             f"rm -rf {shlex.quote(ub_dir)} {shlex.quote(out_dir)}; "
-            f"cp -a {shlex.quote(f'{GUEST_HOST_SHARE}/{UNIXBENCH_DIR}')} {shlex.quote(ub_dir)}"
+            # Trailing slash: dereference a shared symlink to the real tree
+            # instead of copying the link into /tmp.
+            f"cp -a {shlex.quote(f'{GUEST_HOST_SHARE}/{UNIXBENCH_DIR}/')} {shlex.quote(ub_dir)}"
         )
         r_stage = ssh.run(target, cmd_stage, timeout_s=120.0)
         _record(out, ctx, "workload-unixbench.log", cmd_stage, r_stage)
@@ -326,7 +337,7 @@ def unixbench(target: ssh.SshTarget, ctx: CellContext) -> WorkloadResult:
 
     r_reg: ssh.SshResult | None = None
     if policy_enabled:
-        policy_path = _policy_file_in_guest(ctx.profile.get("policy"))
+        policy_path = policy_guest_path("unixbench", ctx.profile.get("policy"))
         policy_name = _policy_short_name(ctx.profile.get("policy"))
         cmd_register = f"cat {shlex.quote(policy_path)} > {shlex.quote(SECURITYFS_REGISTER)}"
         r_reg = ssh.run(target, cmd_register, timeout_s=30.0)
@@ -334,11 +345,13 @@ def unixbench(target: ssh.SshTarget, ctx: CellContext) -> WorkloadResult:
 
     cmd = (
         f"set -euo pipefail; "
-        f"sh {shlex.quote(wrapper)} "
+        f"bash {shlex.quote(wrapper)} "
         f"-d {shlex.quote(ub_dir)} "
         f"-o {shlex.quote(out_dir)} "
         f"-c {cpus} -i {iters}"
     )
+    if build:
+        cmd += " -b"
     wrapper_rc: int | None = None
     if not policy_enabled or (r_reg is not None and r_reg.returncode == 0):
         r = ssh.run(target, cmd, timeout_s=timeout)
@@ -414,10 +427,10 @@ _CELL_ROOT_RESERVED_NAMES: frozenset[str] = frozenset(
 def _normalize_unixbench_layout(cell_dir: Path) -> None:
     """Move the UnixBench result tree under <cell>/results/<run-id>/.
 
-    `lua_lsm_unixbench.sh -o <cell>` produces system.txt, command.txt, and
-    unixbench.log at the cell root plus one extra directory whose name is
-    the UnixBench result-set name (e.g. `unixbench-2026-...`). Move that
-    single extra directory to `<cell>/results/<name>/`.
+    `fixtures/guest/unixbench.sh -o <cell>` produces system.txt,
+    command.txt, and unixbench.log at the cell root plus one extra directory
+    whose name is the UnixBench result-set name (e.g. `unixbench-2026-...`).
+    Move that single extra directory to `<cell>/results/<name>/`.
 
     Multiple unknown directories (a developer copied something else in
     while the run was live) are all moved under results/ to keep the cell
@@ -455,6 +468,75 @@ def verify_cleanup(target: ssh.SshTarget, ctx: CellContext) -> WorkloadResult:
     cmd = f"bash {shlex.quote(script)}"
     r = ssh.run(target, cmd, timeout_s=timeout)
     _record(out, ctx, "workload-verify-cleanup.log", cmd, r)
+    return out
+
+
+def concurrency(target: ssh.SshTarget, ctx: CellContext) -> WorkloadResult:
+    """Stress register/unregister against concurrent hook dispatch.
+
+    The guest fixture starts N worker shells that churn files and tasks while
+    the driver repeatedly registers, races a duplicate register, and
+    unregisters the policy. Unregister happens while workers are still
+    dispatching, so task-VM teardown and module finalization run against live
+    traffic. Any kernel splat during the run is caught by the cell classifier.
+
+    Profile knobs:
+        policy                  policy file to register (required)
+        concurrency_workers     worker shells, default 4
+        concurrency_duration_s  worker run time per cycle set, default 20
+        concurrency_cycles      register/unregister cycles, default 10
+        workload_timeout_s      SSH timeout, default 300
+    """
+    out = WorkloadResult(name="concurrency")
+    script = f"{GUEST_HOST_SHARE}/{LUA_LSM_TESTSUITE_FIXTURES}/guest/concurrency_stress.sh"
+    policy = ctx.profile.get("policy")
+    if not policy:
+        out.returncode = 2
+        out.notes = "concurrency workload requires a policy"
+        return out
+
+    policy_path = policy_guest_path("concurrency", str(policy))
+    workers = int(ctx.profile.get("concurrency_workers", 4))
+    duration = int(ctx.profile.get("concurrency_duration_s", 20))
+    cycles = int(ctx.profile.get("concurrency_cycles", 10))
+    timeout = float(ctx.profile.get("workload_timeout_s", 300.0))
+
+    cmd = (
+        f"bash {shlex.quote(script)} {shlex.quote(policy_path)} "
+        f"{workers} {duration} {cycles}"
+    )
+    r = ssh.run(target, cmd, timeout_s=timeout)
+    _record(out, ctx, "workload-concurrency.log", cmd, r)
+    return out
+
+
+def policy_suite(target: ssh.SshTarget, ctx: CellContext) -> WorkloadResult:
+    """Register one policy, run its companion assertions, then unregister.
+
+    The policy file is resolved through the usual policy path rules. An
+    optional companion script next to it (same name, `.sh` suffix) runs with
+    the policy active and must exit non-zero on failure. This is the entry
+    point for both repository fixtures and PR-local policies under the
+    kernel tree's `.github/ci/policies/`.
+
+    Profile knobs:
+        policy              policy file to exercise (required)
+        workload_timeout_s  SSH timeout, default 300
+    """
+    out = WorkloadResult(name="policy-suite")
+    script = f"{GUEST_HOST_SHARE}/{LUA_LSM_TESTSUITE_FIXTURES}/guest/policy_case.sh"
+    policy = ctx.profile.get("policy")
+    if not policy:
+        out.returncode = 2
+        out.notes = "policy-suite workload requires a policy"
+        return out
+
+    policy_path = policy_guest_path("policy-suite", str(policy))
+    timeout = float(ctx.profile.get("workload_timeout_s", 300.0))
+
+    cmd = f"bash {shlex.quote(script)} {shlex.quote(policy_path)}"
+    r = ssh.run(target, cmd, timeout_s=timeout)
+    _record(out, ctx, "workload-policy-suite.log", cmd, r)
     return out
 
 
@@ -548,12 +630,37 @@ SPECS.update(
         "unixbench": WorkloadSpec(
             name="unixbench",
             fn=unixbench,
-            guest_fixtures=(f"{GUEST_HOST_SHARE}/{LUA_LSM_TOOLS_TOOLS}/lua_lsm_unixbench.sh",),
+            guest_fixtures=(
+                f"{GUEST_HOST_SHARE}/{LUA_LSM_TESTSUITE_FIXTURES}/guest/unixbench.sh",
+            ),
+            policy_guest_dir=f"{LUA_LSM_TESTSUITE_FIXTURES}/policies",
+            default_policy="smoke.lua",
+            self_contained=True,
         ),
         "verify-cleanup": WorkloadSpec(
             name="verify-cleanup",
             fn=verify_cleanup,
             guest_fixtures=(f"{GUEST_HOST_SHARE}/{LUA_LSM_TOOLS_TOOLS}/verify_module_cleanup.sh",),
+        ),
+        "concurrency": WorkloadSpec(
+            name="concurrency",
+            fn=concurrency,
+            guest_fixtures=(
+                f"{GUEST_HOST_SHARE}/{LUA_LSM_TESTSUITE_FIXTURES}/guest/concurrency_stress.sh",
+            ),
+            policy_guest_dir=f"{LUA_LSM_TESTSUITE_FIXTURES}/policies",
+            default_policy="smoke.lua",
+            self_contained=True,
+        ),
+        "policy-suite": WorkloadSpec(
+            name="policy-suite",
+            fn=policy_suite,
+            guest_fixtures=(
+                f"{GUEST_HOST_SHARE}/{LUA_LSM_TESTSUITE_FIXTURES}/guest/policy_case.sh",
+            ),
+            policy_guest_dir=f"{LUA_LSM_TESTSUITE_FIXTURES}/policies",
+            default_policy="smoke.lua",
+            self_contained=True,
         ),
         "lkdtm": WorkloadSpec(
             name="lkdtm",

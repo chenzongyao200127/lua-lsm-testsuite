@@ -24,6 +24,7 @@ from .bisect_run import cmd_bisect_run
 from .common import DEFAULT_LAUNCHER, DEFAULT_RUNS_ROOT, DEFAULT_TOOLS_DIR
 from .image_warm import cmd_image_warm
 from .matrix_cmd import cmd_matrix
+from .perf_report import cmd_perf_report
 from .run import cmd_run
 
 
@@ -207,5 +208,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="explicit marker path (default: <image>.warm-marker)",
     )
     pw.set_defaults(func=cmd_image_warm)
+
+    # --- perf-report ---
+    pp = sub.add_parser(
+        "perf-report",
+        help="summarize UnixBench scores from a runs/ tree (report-only)",
+    )
+    pp.add_argument("--runs-root", type=Path, default=DEFAULT_RUNS_ROOT)
+    pp.add_argument("--out", type=Path, default=None, help="write Markdown report here")
+    pp.add_argument("--json", type=Path, default=None, help="write structured JSON here")
+    pp.set_defaults(func=cmd_perf_report)
 
     return p

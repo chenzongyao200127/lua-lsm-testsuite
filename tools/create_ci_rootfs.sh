@@ -16,6 +16,11 @@
 #   SSH_PUBKEY    Path to the public key injected for root (required)
 #   SUITE         Debian suite (default: bookworm)
 #   MIRROR        Debian mirror (default: http://deb.debian.org/debian)
+#   EXTRA_PACKAGES  Space- or comma-separated package list added to the
+#                   minbase install (e.g. "build-essential perl procps dc
+#                   time" for the UnixBench perf job, which needs cc/make,
+#                   perl, plus uptime/dc/time). Keep this empty for
+#                   functional cells; a toolchain almost doubles the image.
 #
 # Requires root: debootstrap, mkfs.ext4, loop mounts.
 
@@ -26,6 +31,13 @@ IMAGE_SIZE="${IMAGE_SIZE:-2G}"
 SSH_PUBKEY="${SSH_PUBKEY:-}"
 SUITE="${SUITE:-bookworm}"
 MIRROR="${MIRROR:-http://deb.debian.org/debian}"
+EXTRA_PACKAGES="${EXTRA_PACKAGES:-}"
+EXTRA_PACKAGES="${EXTRA_PACKAGES// /,}"
+
+PACKAGES="openssh-server,systemd,systemd-sysv,udev,util-linux,bash,grep,mawk,coreutils,iproute2"
+if [[ -n "$EXTRA_PACKAGES" ]]; then
+    PACKAGES="$PACKAGES,$EXTRA_PACKAGES"
+fi
 
 if [[ -z "$SSH_PUBKEY" || ! -r "$SSH_PUBKEY" ]]; then
     echo "SSH_PUBKEY must point to a readable public key file" >&2
@@ -51,7 +63,7 @@ mkfs.ext4 -q -F "$OUTPUT"
 mount -o loop "$OUTPUT" "$MNT"
 
 debootstrap --variant=minbase \
-    --include=openssh-server,systemd,systemd-sysv,udev,util-linux,bash,grep,mawk,coreutils,iproute2 \
+    --include="$PACKAGES" \
     "$SUITE" "$MNT" "$MIRROR"
 
 echo "lua-ci" > "$MNT/etc/hostname"

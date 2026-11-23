@@ -54,10 +54,17 @@ runner.
 5. Add a workspace inventory/doctor command before changing path defaults.
 6. Add functional cases for policy API semantics, hook dispatch, duplicate and
    invalid policy rejection, and asynchronous unload.
-7. Add a benchmark runner with fixed CPU affinity, warmup, repetitions,
-   environment capture, variance, and baseline comparison.
-8. Add stress cases for concurrent dispatch, task exit, object cleanup, and
-   policy unregister.
+7. ~~Add a benchmark runner with fixed CPU affinity, warmup, repetitions,
+   environment capture, variance, and baseline comparison.~~ Done as a
+   report-only pipeline: the vendored `fixtures/guest/unixbench.sh` pins the
+   guest benchmark (so the numbers are comparable), captures `system.txt` /
+   `command.txt`, and `harness perf-report` compares per-policy medians.
+   Turning scores into a verdict remains a non-goal.
+8. ~~Add stress cases for concurrent dispatch, task exit, object cleanup, and
+   policy unregister.~~ Done: `workloads.concurrency` (=`fixtures/guest/
+   concurrency_stress.sh`) churns files and tasks while cycling
+   register/duplicate-register/unregister, and asserts drain + a clean module
+   list; it is meant to run on a KCSAN + lockdep kernel (`kind: bughunt`).
 
 ## Non-goals
 

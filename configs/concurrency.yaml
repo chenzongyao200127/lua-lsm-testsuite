@@ -1,0 +1,23 @@
+# Concurrency correctness matrix.
+#
+# Each cell starts N worker shells that churn files and tasks while the
+# driver repeatedly registers, races a duplicate register, and unregisters
+# the policy. Run against a KCSAN + lockdep kernel: kernel splats are what
+# fail the cell, and panic_on_warn=1 (kind: bughunt) makes warnings fatal.
+#
+# The default policy is the self-contained allow-all fixture. Point the
+# policy axis at a PR-local policy (absolute /mnt/host/... path) when the
+# change under test needs a different hook shape.
+name: concurrency
+workload: concurrency
+defaults:
+  kvm_required: true
+  kind: bughunt
+  concurrency_workers: 4
+  concurrency_duration_s: 20
+  concurrency_cycles: 10
+  workload_timeout_s: 300
+axes:
+  policy: [smoke]
+  lvm_pool_max: [0, 32]
+exclude: []

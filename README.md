@@ -49,6 +49,40 @@ as the canonical flags; older flags such as `--kernel-image` have been
 removed and the standalone `scripts/bisect-run.sh` shell wrapper is no
 longer needed.
 
+### CI suites
+
+Beyond the smoke/functional matrices, three opt-in suites are shipped here
+and wired into the kernel repository's GitHub Actions workflow:
+
+```sh
+# Register/unregister races against 4 workers; run it on a KCSAN + lockdep
+# kernel (kind: bughunt turns any splat into a cell failure).
+make concurrency KERNEL_IMG=/path/to/kcsan-bzImage
+
+# Run every policy auto-discovered under
+# $WORKSPACE/kernel/linux/.github/ci/policies/*.lua. A policy may ship a
+# companion <name>.sh whose exit code becomes the case verdict.
+make policies
+
+# UnixBench, report-only: scores are collected, never turned into a verdict.
+make matrix-perf
+make perf-report     # markdown table + per-policy medians from runs/
+```
+
+- **Concurrency** (`workload: concurrency`): the guest starts N file/task
+  churn workers, then repeatedly unregisters, re-registers, races a
+  duplicate register, and waits for module drain. It asserts the duplicate
+  is rejected, every unregister drains, and the module list ends clean.
+  Kernel splats are what fail the cell, so use the debug fragment in
+  `kernel.config.concurrency` (KCSAN + PROVE_LOCKING + PREEMPT).
+- **Policies** (`workload: policy-suite` + `discover`): matrix discovery
+  expands one cell per discovered `.lua`, so adding a policy to the kernel
+  repo's `.github/ci/policies/` directory is enough to get it tested. The
+  file name must match the policy's `name` field (unregister is by name).
+- **UnixBench** (`workload: unixbench`): `harness perf-report` parses the
+  `System Benchmarks Index Score` table and reports per-policy medians.
+  The subcommand always exits 0 by design.
+
 ### Live KVM acceptance dry run
 
 The harness REFUSES to plan on macOS, so the end-to-end boot/SSH/workload/
@@ -115,7 +149,7 @@ harness internals.
 
 ```
 lua-lsm-testsuite/
-  Makefile              targets: matrix, smoke, bisect-run, image, kernel-debug, test
+  Makefile              targets: matrix, smoke, concurrency, policies, bisect-run, image, kernel-debug, test
   harness/              Python sources (cell_runner, classifier, bundler, ...)
   configs/              YAML cell and matrix profiles
   tools/                vendored VM launcher and host-side helper scripts

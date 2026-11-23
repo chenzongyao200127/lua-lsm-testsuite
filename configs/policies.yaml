@@ -1,0 +1,23 @@
+# Custom policy regression matrix.
+#
+# Discovers every policy under the kernel tree's `.github/ci/policies/`
+# directory and runs it as one policy-suite cell. A policy may ship a
+# companion `<name>.sh` next to `<name>.lua`; that script runs with the
+# policy active and its exit code becomes the case verdict.
+#
+# `dir` is resolved relative to --share-dir, and the same files appear in
+# the guest under /mnt/host/<dir>. Run with:
+#
+#   python -m harness matrix --config configs/policies.yaml \
+#       --share-dir <workspace> ...
+name: policies
+workload: policy-suite
+defaults:
+  kvm_required: true
+  kind: bughunt
+  workload_timeout_s: 180
+discover:
+  policy:
+    - dir: kernel/linux/.github/ci/policies
+      pattern: "*.lua"
+exclude: []

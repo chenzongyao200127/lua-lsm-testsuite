@@ -13,8 +13,9 @@ POLICY ?= hello
 
 export KERNEL_TREE ROOTFS_IMG KERNEL_IMG DEBUG_KERNEL LUA_LSM_TOOLS WORKSPACE TOOLS_DIR
 
-.PHONY: help sync smoke functional matrix matrix-perf bisect-run image \
-	image-warm kernel-debug test lint format cov selftest clean distclean
+.PHONY: help sync smoke functional matrix matrix-perf concurrency policies \
+	perf-report bisect-run image image-warm kernel-debug test lint format cov \
+	selftest clean distclean
 
 help:
 	@echo "Targets:"
@@ -23,6 +24,9 @@ help:
 	@echo "  functional                    run the self-contained policy API matrix"
 	@echo "  matrix                       run the default 32-cell smoke matrix"
 	@echo "  matrix-perf                  run the UnixBench-anchored matrix (opt-in)"
+	@echo "  concurrency                  run register/unregister races (needs a KCSAN+lockdep kernel)"
+	@echo "  policies                     run every .lua under the workspace's policy directory"
+	@echo "  perf-report                  collect UnixBench scores from runs/ (report-only)"
 	@echo "  bisect-run CELL=<matrix>     run a matrix as a git bisect target with KSFT exit codes"
 	@echo "  image                        build the Rocky9 rootfs with the vendored helper"
 	@echo "  image-warm                   pre-warm the rootfs (consume autorelabel; required before perf runs)"
@@ -48,7 +52,18 @@ matrix:
 
 matrix-perf:
 	$(PYTHON) -m harness matrix --config configs/perf.yaml --parallel $(PARALLEL) \
-		--kernel $(KERNEL_IMG) --rootfs $(ROOTFS_IMG)
+		--kernel $(KERNEL_IMG) --rootfs $(ROOTFS_IMG) --share-dir $(WORKSPACE)
+
+concurrency:
+	$(PYTHON) -m harness matrix --config configs/concurrency.yaml --parallel $(PARALLEL) \
+		--kernel $(KERNEL_IMG) --rootfs $(ROOTFS_IMG) --share-dir $(WORKSPACE)
+
+policies:
+	$(PYTHON) -m harness matrix --config configs/policies.yaml --parallel $(PARALLEL) \
+		--kernel $(KERNEL_IMG) --rootfs $(ROOTFS_IMG) --share-dir $(WORKSPACE)
+
+perf-report:
+	$(PYTHON) -m harness perf-report --runs-root runs
 
 bisect-run:
 	@test -n "$(CELL)" || { echo "CELL=<path-to-matrix.{yaml,json}> is required"; exit 2; }

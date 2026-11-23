@@ -26,6 +26,8 @@ def test_registry_known_workloads():
         "bench-short",
         "unixbench",
         "verify-cleanup",
+        "concurrency",
+        "policy-suite",
         "lkdtm",
     }
 
@@ -129,12 +131,21 @@ def test_unixbench_uses_wrapper_and_writes_into_share(tmp_path, monkeypatch):
     r = workloads.unixbench(ctx.target, ctx)
     assert r.returncode == 0
     joined = "\n".join(ctx.commands)
-    assert "lua_lsm_unixbench.sh" in joined
+    assert "/fixtures/guest/unixbench.sh" in joined
     # AC-5.2: the wrapper's -o argument is the cell root itself, NOT
     # a /unixbench subdir; the result tree gets moved to results/
     # by the post-run normalizer.
     assert "-o /mnt/host/runs/x/cell" in joined
     assert "-o /mnt/host/runs/x/cell/unixbench" not in joined
+
+
+def test_unixbench_build_flag_is_forwarded(tmp_path, monkeypatch):
+    ctx = _ctx(tmp_path, profile={"unixbench_build": True})
+    fake = ssh.SshResult(returncode=0, stdout="", stderr="")
+    monkeypatch.setattr(ssh, "run", MagicMock(return_value=fake))
+    workloads.unixbench(ctx.target, ctx)
+    wrapper_cmd = next(c for c in ctx.commands if "unixbench.sh" in c)
+    assert wrapper_cmd.endswith(" -b")
 
 
 def test_unixbench_post_run_layout_matches_ac52(tmp_path, monkeypatch):
@@ -144,7 +155,7 @@ def test_unixbench_post_run_layout_matches_ac52(tmp_path, monkeypatch):
     art = tmp_path
     ctx = _ctx(art, profile={"guest_artifact_relpath": "runs/x/cell"})
 
-    # Simulate the lua_lsm_unixbench.sh wrapper's output: the wrapper
+    # Simulate the unixbench.sh wrapper's output: the wrapper
     # writes three top-level files at -o and copies its latest
     # results-tree as a subdirectory with the UnixBench run-id.
     run_id = "unixbench-2026-05-27-001"
@@ -212,6 +223,67 @@ def test_lkdtm_returns_77_when_provoke_missing(tmp_path, monkeypatch):
     r = workloads.lkdtm(ctx.target, ctx)
     assert r.returncode == 77
     assert "CONFIG_LKDTM not enabled" in r.notes
+
+
+def test_concurrency_requires_policy(tmp_path, monkeypatch):
+    ctx = _ctx(tmp_path, profile={})
+    mock_run = MagicMock()
+    monkeypatch.setattr(ssh, "run", mock_run)
+    r = workloads.concurrency(ctx.target, ctx)
+    assert r.returncode == 2
+    assert "requires a policy" in r.notes
+    mock_run.assert_not_called()
+
+
+def test_concurrency_invokes_stress_script(tmp_path, monkeypatch):
+    ctx = _ctx(
+        tmp_path,
+        profile={
+            "policy": "smoke",
+            "concurrency_workers": 3,
+            "concurrency_duration_s": 7,
+            "concurrency_cycles": 5,
+        },
+    )
+    fake = ssh.SshResult(returncode=0, stdout="ok 1 - clean\n", stderr="")
+    monkeypatch.setattr(ssh, "run", MagicMock(return_value=fake))
+    r = workloads.concurrency(ctx.target, ctx)
+    assert r.returncode == 0
+    cmd = ctx.commands[0]
+    assert "concurrency_stress.sh" in cmd
+    assert "/mnt/host/lua-lsm-testsuite/fixtures/policies/smoke.lua" in cmd
+    assert cmd.endswith("3 7 5")
+
+
+def test_policy_suite_requires_policy(tmp_path, monkeypatch):
+    ctx = _ctx(tmp_path, profile={})
+    mock_run = MagicMock()
+    monkeypatch.setattr(ssh, "run", mock_run)
+    r = workloads.policy_suite(ctx.target, ctx)
+    assert r.returncode == 2
+    mock_run.assert_not_called()
+
+
+def test_policy_suite_passes_absolute_policy_path(tmp_path, monkeypatch):
+    ctx = _ctx(tmp_path, profile={"policy": "/mnt/host/kernel/linux/.github/ci/policies/allow.lua"})
+    fake = ssh.SshResult(returncode=0, stdout="ok 1 - clean\n", stderr="")
+    monkeypatch.setattr(ssh, "run", MagicMock(return_value=fake))
+    r = workloads.policy_suite(ctx.target, ctx)
+    assert r.returncode == 0
+    cmd = ctx.commands[0]
+    assert "policy_case.sh" in cmd
+    assert "/mnt/host/kernel/linux/.github/ci/policies/allow.lua" in cmd
+
+
+def test_policy_host_path_maps_guest_share_back_to_host(tmp_path):
+    guest = "/mnt/host/kernel/linux/.github/ci/policies/allow.lua"
+    paths = workloads.policy_host_path(tmp_path, "policy-suite", guest)
+    assert paths == (tmp_path / "kernel/linux/.github/ci/policies/allow.lua",)
+
+
+def test_policy_host_path_passes_bare_host_absolute_through(tmp_path):
+    paths = workloads.policy_host_path(tmp_path, "policy-suite", "/opt/policies/allow.lua")
+    assert paths == (Path("/opt/policies/allow.lua"),)
 
 
 # --- PolicyFileGuestPathTests ---
@@ -321,11 +393,11 @@ def test_unixbench_brackets_wrapper_with_register_and_unregister(tmp_path, monke
     )
     # Step 1: register denyfile.lua via securityfs.
     assert (
-        "cat /mnt/host/lua-lsm-tools/examples/denyfile.lua "
+        "cat /mnt/host/lua-lsm-testsuite/fixtures/policies/denyfile.lua "
         "> /sys/kernel/security/lua/register" in ctx.commands[0]
     )
     # Step 2: wrapper invocation.
-    assert "lua_lsm_unixbench.sh" in ctx.commands[1]
+    assert "/fixtures/guest/unixbench.sh" in ctx.commands[1]
     # Step 3: unregister by short name.
     assert "echo denyfile > /sys/kernel/security/lua/unregister" in ctx.commands[2]
 
@@ -340,7 +412,7 @@ def test_unixbench_policy_none_skips_register_and_unregister(tmp_path, monkeypat
     r = workloads.unixbench(ctx.target, ctx)
     assert r.returncode == 0
     assert len(ctx.commands) == 1, "policy=none must run only the UnixBench wrapper"
-    assert "lua_lsm_unixbench.sh" in ctx.commands[0]
+    assert "/fixtures/guest/unixbench.sh" in ctx.commands[0]
     assert "/sys/kernel/security/lua/register" not in ctx.commands[0]
     assert "/sys/kernel/security/lua/unregister" not in ctx.commands[0]
 
@@ -362,8 +434,8 @@ def test_unixbench_guest_local_stages_tree_under_tmp(tmp_path, monkeypatch):
     assert len(ctx.commands) == 2, (
         "guest-local unixbench must issue exactly two commands: stage + wrapper"
     )
-    assert "cp -a /mnt/host/unixbench /tmp/c1-unixbench" in ctx.commands[0]
-    assert "lua_lsm_unixbench.sh" in ctx.commands[1]
+    assert "cp -a /mnt/host/unixbench/ /tmp/c1-unixbench" in ctx.commands[0]
+    assert "/fixtures/guest/unixbench.sh" in ctx.commands[1]
     assert "-d /tmp/c1-unixbench" in ctx.commands[1]
     assert "-o /tmp/c1-lua-lsm-unixbench" in ctx.commands[1]
 
@@ -419,7 +491,7 @@ def test_unixbench_skips_wrapper_when_register_fails(tmp_path, monkeypatch):
     r = workloads.unixbench(ctx.target, ctx)
     assert len(ctx.commands) == 2
     joined = "\n".join(ctx.commands)
-    assert "lua_lsm_unixbench.sh" not in joined
+    assert "/fixtures/guest/unixbench.sh" not in joined
     assert r.returncode == 1
     assert "register exited" in (r.notes or "")
 

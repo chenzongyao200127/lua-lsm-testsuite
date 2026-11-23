@@ -5,6 +5,7 @@ Subcommands:
     matrix       expand a matrix YAML/JSON and run every cell (cli.matrix_cmd)
     bisect-run   matrix/cell exit codes shaped for git-bisect (cli.bisect_run)
     image-warm   write the rootfs warm-marker file once       (cli.image_warm)
+    perf-report  collect UnixBench scores (report-only)        (cli.perf_report)
 
 The CLI does not implement boot/shell logic itself: it constructs a
 CellInputs / MatrixPlan and hands it to harness.cell_runner.run_cell or
@@ -23,6 +24,7 @@ Exit codes:
     matrix      0 on pass, 1 on any failed cell; KSFT 4 on all-skip.
     bisect-run  bisect.exit_code_from_matrix (0/1/125/128).
     image-warm  0 on success, 1 on missing image / write failure.
+    perf-report 0 always (scores are collected, never gated).
 """
 
 from __future__ import annotations

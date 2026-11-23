@@ -28,7 +28,11 @@ def cmd_bisect_run(args: argparse.Namespace) -> int:
     if getattr(args, "cell", None) is not None:
         return _cmd_bisect_run_single_cell(args)
 
-    plan = matrix.plan_from_file(Path(args.config))
+    try:
+        plan = matrix.plan_from_file(Path(args.config), discover_root=args.share_dir)
+    except ValueError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return bisect.KSFT_ABORT
     if args.share_dir is not None:
         try:
             matrix.assert_share_dir(
