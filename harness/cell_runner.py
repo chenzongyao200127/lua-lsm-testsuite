@@ -101,6 +101,9 @@ class CellInputs:
     # Regexes for known base-kernel splat headers; matching classifier hits
     # are recorded as ignored_splats instead of failing the cell.
     known_splats: tuple[str, ...] = field(default_factory=tuple)
+    # Regexes matched against the report block (header + stack frames); see
+    # split_ignored().
+    known_blocks: tuple[str, ...] = field(default_factory=tuple)
     # Override path for the rootfs warm-marker; when None and rootfs_image is
     # set, the runner derives `<rootfs_image>.warm-marker` to match the
     # convention used by the `image-warm` CLI helper.
@@ -602,7 +605,9 @@ def _classify_and_finalize(
     paths = [p for p in (serial_log, dmesg_log) if p.exists() and p.stat().st_size > 0]
     hits = classifier.classify_files(paths)
     result["classifier_pattern_version"] = classifier_patterns.PATTERN_VERSION
-    fatal_hits, ignored_hits = classifier.split_ignored(hits, inputs.known_splats)
+    fatal_hits, ignored_hits = classifier.split_ignored(
+        hits, inputs.known_splats, inputs.known_blocks
+    )
     result["classifier_hits"] = [h.to_dict() for h in fatal_hits]
     result["ignored_splats"] = [h.to_dict() for h in ignored_hits]
 
