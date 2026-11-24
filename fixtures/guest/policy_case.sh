@@ -67,16 +67,21 @@ module_present()
 		"$modules" 2>/dev/null
 }
 
-wait_module_absent()
+# A module is also mapped into the Lua VM of every task that ran a hook, and
+# those VMs drain asynchronously when their tasks exit. Unregister then answers
+# EBUSY and leaves the module as a zombie; a later write finishes the job, so
+# retry until the module list converges instead of assuming one-shot success.
+unregister_policy()
 {
-	local timeout=50
 	local i
 
-	for ((i = 0; i < timeout; i++)); do
+	for ((i = 0; i < 150; i++)); do
 		module_present || return 0
+		echo "$policy_name" > "$unregister" 2>/dev/null
 		sleep 0.2
 	done
-	return 1
+	module_present && return 1
+	return 0
 }
 
 cleanup()
@@ -153,8 +158,7 @@ if [[ -r "$companion" ]]; then
 	fi
 fi
 
-echo "$policy_name" > "$unregister"
-run_test "policy unregisters" wait_module_absent
+run_test "policy unregisters" unregister_policy
 run_test "module list ends clean" check_absent
 
 echo "# Planned tests: $test_count"
