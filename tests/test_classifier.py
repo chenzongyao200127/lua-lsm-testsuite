@@ -152,6 +152,56 @@ def test_block_rule_catches_short_lua_helper_names():
     assert [h.pattern for h in fatal] == ["BUG: KCSAN"]
 
 
+def _kcsan_irq_report(read_frames, write_frames):
+    return "\n".join(
+        [
+            "[    1.0] ==================================================================",
+            "[    1.0] BUG: KCSAN: data-race in __hrtimer_run_queues / hrtimer_active",
+            "[    1.0] ",
+            "[    1.0] read to 0xffff8881f9c9c790 of 8 bytes by interrupt on cpu 0:",
+            *[f"[    1.0]  {f}" for f in read_frames],
+            "[    1.0] ",
+            "[    1.0] write to 0xffff8881f9c9c790 of 8 bytes by interrupt on cpu 1:",
+            *[f"[    1.0]  {f}" for f in write_frames],
+            "[    1.0] ==================================================================",
+        ]
+    )
+
+
+def test_block_rule_ignores_lua_frames_of_the_interrupted_task():
+    # Both racing accesses run inside the timer interrupt; the read side merely
+    # interrupted a task building a Lua VM. The bystander frames must not make
+    # the report fatal.
+    log = _kcsan_irq_report(
+        [
+            "hrtimer_active+0x77/0xf0",
+            "enqueue_task_fair+0x9fa/0xc30",
+            "sysvec_apic_timer_interrupt+0x70/0x80",
+            "asm_sysvec_apic_timer_interrupt+0x1a/0x20",
+            "__kmalloc_node_track_caller_noprof+0xb1/0x640",
+            "lvm_alloc+0x83/0xc0",
+            "luaM_realloc_+0x5c/0xb0",
+            "lvm_get+0x463/0x4d0",
+        ],
+        ["__hrtimer_run_queues+0x237/0x540", "hrtimer_interrupt+0x21f/0x420"],
+    )
+    fatal, ignored = split_ignored(classify_text(log), (), [KCSAN_LUA_RULE])
+    assert [h.pattern for h in ignored] == ["BUG: KCSAN"]
+    assert fatal == []
+
+
+def test_block_rule_keeps_lua_frames_when_the_race_itself_reaches_them():
+    # The read side runs in task context through the interpreter: that is our
+    # code racing, not an interrupted bystander, and it stays fatal.
+    log = _kcsan_irq_report(
+        ["hrtimer_active+0x77/0xf0", "lvm_get+0x463/0x4d0", "lvm_alloc+0x83/0xc0"],
+        ["__hrtimer_run_queues+0x237/0x540", "hrtimer_interrupt+0x21f/0x420"],
+    )
+    fatal, ignored = split_ignored(classify_text(log), (), [KCSAN_LUA_RULE])
+    assert ignored == []
+    assert [h.pattern for h in fatal] == ["BUG: KCSAN"]
+
+
 def test_hit_dict_omits_block():
     hit = classify_text("BUG: KCSAN: data-race in a / b\n")[0]
     assert hit.block.startswith("BUG: KCSAN")

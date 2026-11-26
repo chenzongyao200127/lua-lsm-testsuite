@@ -7,9 +7,10 @@ A "hit" is recorded as {pattern, line, substring, text} where:
 - text is the full log line; `known_splats` baselines match against it, so a
   headline that starts with a stable splat header can be ignored by matrix
   config without widening the anchored pattern set
-- block is the header plus the stack-frame symbols of the report; `known_blocks`
-  baselines match against it, which lets a rule reason over the whole report
-  (e.g. ignore a sanitizer report only when no Lua symbol appears anywhere)
+- block is the header plus the stack frames of the racing accesses; frames that
+  only show what an interrupt landed on are excluded; `known_blocks` baselines
+  match against it, which lets a rule reason over the whole report
+  (e.g. ignore a sanitizer report only when no Lua symbol races)
 """
 
 from __future__ import annotations
@@ -28,6 +29,20 @@ _BLOCK_END = re.compile(r"^\s*(?:\[[^\]]*\]\s*)?=+\s*$")
 # lines are kept: the surrounding "Comm: ... <version>" line embeds the kernel
 # release string, which must not be mistaken for a Lua symbol.
 _STACK_FRAME = re.compile(r"^\s*(?:\[[^\]]*\]\s*)?\s+[A-Za-z_][\w.]*\+0x[0-9a-f]+/0x[0-9a-f]+")
+
+# An access-stack header inside a KCSAN report, e.g. "read to 0x... of 8 bytes
+# by interrupt on cpu 0:". Each header starts a fresh stack, so the
+# interrupted-context cut below applies per stack, not to the whole report.
+_ACCESS_HEADER = re.compile(r"^\s*(?:\[[^\]]*\]\s*)?(?:read|write) to \S+ of \d+ bytes by ")
+
+# An interrupt-entry frame, e.g. "asm_sysvec_apic_timer_interrupt+0x1a/0x20".
+# Frames below such an entry belong to the task the interrupt landed on, not to
+# the racing access: they are the bystander context a report happens to capture,
+# not a participant. Entry symbols: asm_sysvec_*, sysvec_*, asm_exc_*, exc_*,
+# asm_common_interrupt, error_entry.
+_INTERRUPT_ENTRY = re.compile(
+    r"(?:^|\s)(?:asm_)?(?:sysvec_|exc_|common_interrupt|error_entry)[\w.]*\+0x"
+)
 
 _MAX_BLOCK_LINES = 200
 
@@ -49,13 +64,28 @@ class ClassifierHit:
 
 
 def _report_block(lines: Sequence[str], idx: int) -> str:
-    """Header plus stack frames of the report starting at `lines[idx]`."""
+    """Header plus the racing stacks of the report starting at `lines[idx]`.
+
+    A KCSAN report lists one stack per racing access, each introduced by a
+    "read/write to ..." header. Frames below an interrupt-entry frame in a
+    stack are the task the interrupt landed on: a bystander, not a racer.
+    They are excluded so a rule can ask "is our code in the race?" without
+    the answer depending on what the timer interrupt happened to interrupt.
+    """
     block = [lines[idx]]
+    interrupted = False
     for line in lines[idx + 1 : idx + 1 + _MAX_BLOCK_LINES]:
         if _BLOCK_END.match(line):
             break
+        if _ACCESS_HEADER.match(line):
+            interrupted = False
+            continue
         if _STACK_FRAME.match(line):
-            block.append(line)
+            if _INTERRUPT_ENTRY.search(line):
+                block.append(line)
+                interrupted = True
+            elif not interrupted:
+                block.append(line)
     return "\n".join(block)
 
 
